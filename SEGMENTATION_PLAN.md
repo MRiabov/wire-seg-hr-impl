@@ -9,7 +9,7 @@ This plan distills the model and pipeline described in the paper sources:
 Focus: segmentation only (no dataset collection or inpainting).
 
 ## Decisions and Defaults (locked)
-- Backbone: SegFormer MiT-B3 (shared encoder `E`).
+- Backbone: SegFormer MiT-B3 via HuggingFace Transformers (shared encoder `E`), with `timm` or tiny CNN fallback.
 - Fine/local patch size p: 768.
 - Conditioning: global map + binary location mask by default (Table `tables/logit.tex`).
 - Conditioning map scope: patch-cropped from the global map per `paper-tex/sections/method_yq.tex` (no full-image concatenation variant).
@@ -41,7 +41,7 @@ Focus: segmentation only (no dataset collection or inpainting).
 - `README.md` (segmentation-only usage)
 
 ## Model Specification
-- Shared encoder `E`: SegFormer MiT-B3.
+- Shared encoder `E`: SegFormer MiT-B3 (HF Transformers preferred).
   - Input channels (default): 3 (RGB) + 2 (MinMax) + 1 (global cond) + 1 (binary location) = 7.
   - For the coarse pass, the cond and location channels are zeros to keep channel count consistent (`method_yq.tex`).
   - Weight init for extra channels: copy mean of RGB conv weights or zero-init.
@@ -64,6 +64,14 @@ Focus: segmentation only (no dataset collection or inpainting).
 - Coarse GT label generation (MaxPool):
   - Downsample full-res mask to coarse size with max-pooling to prevent wire vanishing (`method_yq.tex`).
 - Normalization: standard mean/std per backbone; apply consistently across channels (new channels can be mean=0, std=1 by convention, or min-max scaled).
+
+### Dataset Convention (project-specific)
+- Flat directories with numeric filenames; images are `.jpg`/`.jpeg`, masks are `.png`.
+- Example:
+  - `dataset/images/1.jpg, 2.jpg, ..., N.jpg` (or `.jpeg`)
+  - `dataset/gts/1.png, 2.png, ..., N.png`
+- Masks are binary: foreground = white (255), background = black (0).
+- The loader (`data/dataset.py`) strictly enforces numeric stems and 1:1 pairing and will assert on mismatch.
 
 ## Training Pipeline
 - Augment the full-res image (scaling, rotation, horizontal flip, photometric distortion) before constructing coarse/fine inputs (`method.tex`).

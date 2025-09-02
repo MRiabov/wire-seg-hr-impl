@@ -28,4 +28,25 @@ python src/wireseghr/infer.py --config configs/default.yaml --image /path/to/ima
 
 ## Notes
 - This is a segmentation-only codebase. Inpainting is out of scope here.
-- Defaults locked: MiT-B3 encoder, patch size 768, MinMax 6×6, global+binary mask conditioning with patch-cropped global map.
+- Defaults locked: SegFormer MiT-B3 encoder, patch size 768, MinMax 6×6, global+binary mask conditioning with patch-cropped global map.
+
+### Backbone Source
+- Preferred: HuggingFace Transformers SegFormer (e.g., `nvidia/mit-b3`). We set `num_channels` to match input channels.
+- Optional: `timm` features_only if a compatible SegFormer is available.
+- Fallback: a small internal CNN that preserves 1/4, 1/8, 1/16, 1/32 strides with channels [64, 128, 320, 512].
+
+Install requirements to get Transformers:
+```
+pip install -r requirements.txt
+```
+
+## Dataset Convention
+- Flat directories with numeric filenames; images are `.jpg`/`.jpeg`, masks are `.png`.
+- Example (after split 85/5/10):
+  - `dataset/train/images/1.jpg, 2.jpg, ...` and `dataset/train/gts/1.png, 2.png, ...`
+  - `dataset/val/images/...` and `dataset/val/gts/...`
+  - `dataset/test/images/...` and `dataset/test/gts/...`
+- Masks are binary: foreground = white (255), background = black (0).
+- The loader strictly enforces numeric stems and 1:1 pairing and will assert on mismatches.
+
+Update `configs/default.yaml` with your paths under `data.train_images`, `data.train_masks`, etc. Defaults point to `dataset/train/images`, `dataset/train/gts`, and validation to `dataset/val/...`.

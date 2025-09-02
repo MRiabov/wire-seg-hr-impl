@@ -36,19 +36,25 @@ class WireSegDataset:
         return {"image": img, "mask": mask_bin, "image_path": str(img_path), "mask_path": str(mask_path)}
 
     def _index_pairs(self) -> List[tuple[Path, Path]]:
-        exts_img = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
-        exts_mask = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
-        imgs: Dict[str, Path] = {}
-        for p in sorted(self.images_dir.rglob("*")):
-            if p.is_file() and p.suffix.lower() in exts_img:
-                imgs[p.stem] = p
-        masks: Dict[str, Path] = {}
-        for p in sorted(self.masks_dir.rglob("*")):
-            if p.is_file() and p.suffix.lower() in exts_mask:
-                masks[p.stem] = p
+        # Convention: numeric filenames; images are .jpg/.jpeg; masks (gts) are .png
+        img_files = sorted([p for p in self.images_dir.glob("*.jpg") if p.is_file()])
+        img_files += sorted([p for p in self.images_dir.glob("*.jpeg") if p.is_file()])
+        assert len(img_files) > 0, f"No .jpg/.jpeg images in {self.images_dir}"
         pairs: List[tuple[Path, Path]] = []
-        for stem, ip in imgs.items():
-            if stem in masks:
-                pairs.append((ip, masks[stem]))
-        assert len(pairs) > 0, f"No image-mask pairs found in {self.images_dir} and {self.masks_dir}"
+        ids: List[int] = []
+        for p in img_files:
+            stem = p.stem
+            assert stem.isdigit(), f"Non-numeric filename encountered: {p.name}"
+            ids.append(int(stem))
+        ids = sorted(ids)
+        for i in ids:
+            # Prefer .jpg, else .jpeg
+            ip_jpg = self.images_dir / f"{i}.jpg"
+            ip_jpeg = self.images_dir / f"{i}.jpeg"
+            ip = ip_jpg if ip_jpg.exists() else ip_jpeg
+            assert ip.exists(), f"Missing image for {i}: {ip_jpg} or {ip_jpeg}"
+            mp = self.masks_dir / f"{i}.png"
+            assert mp.exists(), f"Missing mask for {i}: {mp}"
+            pairs.append((ip, mp))
+        assert len(pairs) > 0, f"No numeric pairs found in {self.images_dir} and {self.masks_dir}"
         return pairs

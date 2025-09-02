@@ -1,5 +1,6 @@
 # Default configuration for WireSegHR (segmentation-only)
 backbone: mit_b3
+pretrained: true  # Uses HF SegFormer weights if available; else timm or tiny fallback
 
 coarse:
   train_size: 512
@@ -34,9 +35,18 @@ optim:
   schedule: poly
   power: 1.0
 
+# training housekeeping
+seed: 42
+out_dir: runs/wireseghr
+eval_interval: 500
+ckpt_interval: 1000
+# resume: runs/wireseghr/ckpt_1000.pt  # optional
+
 # dataset paths (placeholders)
 data:
-  train_images: /path/to/train/images
-  train_masks: /path/to/train/masks
-  val_images: /path/to/val/images
-  val_masks: /path/to/val/masks
+  train_images: dataset/train/images
+  train_masks: dataset/train/gts
+  val_images: dataset/val/images
+  val_masks: dataset/val/gts
+  test_images: dataset/test/images
+  test_masks: dataset/test/gts

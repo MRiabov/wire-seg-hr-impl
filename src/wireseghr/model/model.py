@@ -22,8 +22,8 @@ class WireSegHR(nn.Module):
     def __init__(self, backbone: str = "mit_b3", in_channels: int = 7, pretrained: bool = True):
         super().__init__()
         self.encoder = SegFormerEncoder(backbone=backbone, in_channels=in_channels, pretrained=pretrained)
-        # Default MiT-B3 channel dims for stages
-        in_chs = (64, 128, 320, 512)
+        # Use encoder-exposed feature dims for decoder projections
+        in_chs = tuple(self.encoder.feature_dims)
         self.coarse_head = CoarseDecoder(in_chs=in_chs, embed_dim=128, num_classes=2)
         self.fine_head = FineDecoder(in_chs=in_chs, embed_dim=128, num_classes=2)
         self.cond1x1 = Conditioning1x1()
