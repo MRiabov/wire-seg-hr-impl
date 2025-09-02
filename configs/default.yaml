@@ -1,0 +1,42 @@
+# Default configuration for WireSegHR (segmentation-only)
+backbone: mit_b3
+
+coarse:
+  train_size: 512
+  test_size: 1024
+
+fine:
+  patch_size: 768
+  overlap: 128
+
+conditioning:
+  use_binary_location: true
+  cond_from: coarse_logits_1x1
+  cond_crop: patch  # per published method (method_yq)
+
+minmax:
+  enable: true
+  kernel: 6  # fixed 6x6 luminance min/max
+
+label:
+  coarse_downsample: maxpool
+
+inference:
+  alpha: 0.01
+  prob_threshold: 0.5
+  stitch: avg_logits
+
+optim:
+  iters: 40000
+  batch_size: 8
+  lr: 6e-5
+  weight_decay: 0.01
+  schedule: poly
+  power: 1.0
+
+# dataset paths (placeholders)
+data:
+  train_images: /path/to/train/images
+  train_masks: /path/to/train/masks
+  val_images: /path/to/val/images
+  val_masks: /path/to/val/masks
