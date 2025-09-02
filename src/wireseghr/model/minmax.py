@@ -23,6 +23,7 @@ class MinMaxLuminance:
         y = (0.299 * r + 0.587 * g + 0.114 * b).astype(np.float32)
 
         import cv2  # lazy import to avoid test-time dependency at module import
+
         kernel = np.ones((self.kernel, self.kernel), dtype=np.uint8)
         y_min = cv2.erode(y, kernel, borderType=cv2.BORDER_REPLICATE)
         y_max = cv2.dilate(y, kernel, borderType=cv2.BORDER_REPLICATE)

@@ -33,7 +33,12 @@ class WireSegDataset:
         mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
         assert mask is not None, f"Failed to read mask: {mask_path}"
         mask_bin = (mask > 0).astype(np.uint8)
-        return {"image": img, "mask": mask_bin, "image_path": str(img_path), "mask_path": str(mask_path)}
+        return {
+            "image": img,
+            "mask": mask_bin,
+            "image_path": str(img_path),
+            "mask_path": str(mask_path),
+        }
 
     def _index_pairs(self) -> List[tuple[Path, Path]]:
         # Convention: numeric filenames; images are .jpg/.jpeg; masks (gts) are .png
@@ -56,5 +61,7 @@ class WireSegDataset:
             mp = self.masks_dir / f"{i}.png"
             assert mp.exists(), f"Missing mask for {i}: {mp}"
             pairs.append((ip, mp))
-        assert len(pairs) > 0, f"No numeric pairs found in {self.images_dir} and {self.masks_dir}"
+        assert len(pairs) > 0, (
+            f"No numeric pairs found in {self.images_dir} and {self.masks_dir}"
+        )
         return pairs

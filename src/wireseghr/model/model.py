@@ -19,16 +19,22 @@ class WireSegHR(nn.Module):
     Conditioning 1x1 is applied to coarse logits to produce a single-channel map.
     """
 
-    def __init__(self, backbone: str = "mit_b3", in_channels: int = 7, pretrained: bool = True):
+    def __init__(
+        self, backbone: str = "mit_b3", in_channels: int = 7, pretrained: bool = True
+    ):
         super().__init__()
-        self.encoder = SegFormerEncoder(backbone=backbone, in_channels=in_channels, pretrained=pretrained)
+        self.encoder = SegFormerEncoder(
+            backbone=backbone, in_channels=in_channels, pretrained=pretrained
+        )
         # Use encoder-exposed feature dims for decoder projections
         in_chs = tuple(self.encoder.feature_dims)
         self.coarse_head = CoarseDecoder(in_chs=in_chs, embed_dim=128, num_classes=2)
         self.fine_head = FineDecoder(in_chs=in_chs, embed_dim=128, num_classes=2)
         self.cond1x1 = Conditioning1x1()
 
-    def forward_coarse(self, x_coarse: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward_coarse(
+        self, x_coarse: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         assert x_coarse.dim() == 4
         feats = self.encoder(x_coarse)
         logits_coarse = self.coarse_head(feats)

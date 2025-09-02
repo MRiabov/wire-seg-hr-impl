@@ -20,6 +20,7 @@ def downsample_label_maxpool(mask: np.ndarray, out_h: int, out_w: int) -> np.nda
     assert mask.ndim == 2
     # Convert to float32 so area resize yields fractional averages > 0 if any positive present
     import cv2
+
     m = mask.astype(np.float32)
     r = cv2.resize(m, (out_w, out_h), interpolation=cv2.INTER_AREA)
     out = (r > 0.0).astype(np.uint8)

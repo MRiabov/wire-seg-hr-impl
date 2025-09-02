@@ -29,4 +29,9 @@ def compute_metrics(pred_mask: np.ndarray, gt_mask: np.ndarray) -> Dict[str, flo
     denom_f1 = precision + recall
     f1 = (2 * precision * recall / denom_f1) if denom_f1 > 0 else 0.0
 
-    return {"iou": float(iou), "f1": float(f1), "precision": float(precision), "recall": float(recall)}
+    return {
+        "iou": float(iou),
+        "f1": float(f1),
+        "precision": float(precision),
+        "recall": float(recall),
+    }

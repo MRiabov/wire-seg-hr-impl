@@ -24,7 +24,9 @@ from wireseghr.metrics import compute_metrics
 
 def main():
     parser = argparse.ArgumentParser(description="WireSegHR training (skeleton)")
-    parser.add_argument("--config", type=str, default="configs/default.yaml", help="Path to YAML config")
+    parser.add_argument(
+        "--config", type=str, default="configs/default.yaml", help="Path to YAML config"
+    )
     args = parser.parse_args()
 
     cfg_path = args.config
@@ -42,12 +44,12 @@ def main():
 
     # Config
     coarse_train = int(cfg["coarse"]["train_size"])  # 512
-    patch_size = int(cfg["fine"]["patch_size"])      # 768
-    iters = int(cfg["optim"]["iters"])               # 40000
-    batch_size = int(cfg["optim"]["batch_size"])     # 8
-    base_lr = float(cfg["optim"]["lr"])              # 6e-5
+    patch_size = int(cfg["fine"]["patch_size"])  # 768
+    iters = int(cfg["optim"]["iters"])  # 40000
+    batch_size = int(cfg["optim"]["batch_size"])  # 8
+    base_lr = float(cfg["optim"]["lr"])  # 6e-5
     weight_decay = float(cfg["optim"]["weight_decay"])  # 0.01
-    power = float(cfg["optim"]["power"])             # 1.0
+    power = float(cfg["optim"]["power"])  # 1.0
     amp_flag = bool(cfg["optim"].get("amp", True))
 
     # Housekeeping
@@ -67,15 +69,29 @@ def main():
     val_masks = cfg["data"].get("val_masks", None)
     test_images = cfg["data"].get("test_images", None)
     test_masks = cfg["data"].get("test_masks", None)
-    dset_val = WireSegDataset(val_images, val_masks, split="val") if val_images and val_masks else None
-    dset_test = WireSegDataset(test_images, test_masks, split="test") if test_images and test_masks else None
+    dset_val = (
+        WireSegDataset(val_images, val_masks, split="val")
+        if val_images and val_masks
+        else None
+    )
+    dset_test = (
+        WireSegDataset(test_images, test_masks, split="test")
+        if test_images and test_masks
+        else None
+    )
     sampler = BalancedPatchSampler(patch_size=patch_size, min_wire_ratio=0.01)
-    minmax = MinMaxLuminance(kernel=cfg["minmax"]["kernel"]) if cfg["minmax"]["enable"] else None
+    minmax = (
+        MinMaxLuminance(kernel=cfg["minmax"]["kernel"])
+        if cfg["minmax"]["enable"]
+        else None
+    )
 
     # Model
     # Channel definition: RGB(3) + MinMax(2) + cond(1) + loc(1) = 7
     pretrained_flag = bool(cfg.get("pretrained", False))
-    model = WireSegHR(backbone=cfg["backbone"], in_channels=7, pretrained=pretrained_flag)
+    model = WireSegHR(
+        backbone=cfg["backbone"], in_channels=7, pretrained=pretrained_flag
+    )
     model = model.to(device)
 
     # Optimizer and loss
@@ -89,7 +105,9 @@ def main():
     resume_path = cfg.get("resume", None)
     if resume_path and os.path.isfile(resume_path):
         print(f"[WireSegHR][train] Resuming from {resume_path}")
-        start_step, best_f1 = _load_checkpoint(resume_path, model, optim, scaler, device)
+        start_step, best_f1 = _load_checkpoint(
+            resume_path, model, optim, scaler, device
+        )
 
     # Training loop
     model.train()
@@ -98,14 +116,21 @@ def main():
     while step < iters:
         optim.zero_grad(set_to_none=True)
         imgs, masks = _sample_batch_same_size(dset, batch_size)
-        batch = _prepare_batch(imgs, masks, coarse_train, patch_size, sampler, minmax, device)
+        batch = _prepare_batch(
+            imgs, masks, coarse_train, patch_size, sampler, minmax, device
+        )
 
-        logits_coarse, cond_map = model.forward_coarse(batch["x_coarse"])  # (B,2,Hc/4,Wc/4) and (B,1,Hc/4,Wc/4)
+        logits_coarse, cond_map = model.forward_coarse(
+            batch["x_coarse"]
+        )  # (B,2,Hc/4,Wc/4) and (B,1,Hc/4,Wc/4)
 
         # Upsample cond to full-res to crop the fine patch-aligned conditioning
         B, _, hc4, wc4 = cond_map.shape
         cond_up = F.interpolate(
-            cond_map.detach(), size=(batch["full_h"], batch["full_w"]), mode="bilinear", align_corners=False
+            cond_map.detach(),
+            size=(batch["full_h"], batch["full_w"]),
+            mode="bilinear",
+            align_corners=False,
         )
 
         # Build fine inputs: crop cond to patch, concat with patch RGB+MinMax and loc mask
@@ -114,7 +139,9 @@ def main():
 
         # Targets
         y_coarse = _build_coarse_targets(batch["mask_full"], hc4, wc4, device)
-        y_fine = _build_fine_targets(batch["mask_patches"], logits_fine.shape[2], logits_fine.shape[3], device)
+        y_fine = _build_fine_targets(
+            batch["mask_patches"], logits_fine.shape[2], logits_fine.shape[3], device
+        )
 
         with autocast(enabled=(device.type == "cuda" and amp_flag)):
             loss_coarse = ce(logits_coarse, y_coarse)
@@ -131,25 +158,47 @@ def main():
             pg["lr"] = lr
 
         if step % 50 == 0:
-            print(
-                f"[Iter {step}/{iters}] lr={lr:.6e}"
-            )
+            print(f"[Iter {step}/{iters}] lr={lr:.6e}")
 
         # Eval & Checkpoint
         if (step % eval_interval == 0) and (dset_val is not None):
             model.eval()
             val_stats = validate(model, dset_val, coarse_train, device, amp_flag)
-            print(f"[Val @ {step}] IoU={val_stats['iou']:.4f} F1={val_stats['f1']:.4f} P={val_stats['precision']:.4f} R={val_stats['recall']:.4f}")
+            print(
+                f"[Val @ {step}] IoU={val_stats['iou']:.4f} F1={val_stats['f1']:.4f} P={val_stats['precision']:.4f} R={val_stats['recall']:.4f}"
+            )
             # Save best
             if val_stats["f1"] > best_f1:
                 best_f1 = val_stats["f1"]
-                _save_checkpoint(os.path.join(out_dir, "best.pt"), step, model, optim, scaler, best_f1)
+                _save_checkpoint(
+                    os.path.join(out_dir, "best.pt"),
+                    step,
+                    model,
+                    optim,
+                    scaler,
+                    best_f1,
+                )
             # Save periodic ckpt
             if ckpt_interval > 0 and (step % ckpt_interval == 0):
-                _save_checkpoint(os.path.join(out_dir, f"ckpt_{step}.pt"), step, model, optim, scaler, best_f1)
+                _save_checkpoint(
+                    os.path.join(out_dir, f"ckpt_{step}.pt"),
+                    step,
+                    model,
+                    optim,
+                    scaler,
+                    best_f1,
+                )
             # Save test visualizations
             if dset_test is not None:
-                save_test_visuals(model, dset_test, coarse_train, device, os.path.join(out_dir, f"test_vis_{step}"), amp_flag, max_samples=8)
+                save_test_visuals(
+                    model,
+                    dset_test,
+                    coarse_train,
+                    device,
+                    os.path.join(out_dir, f"test_vis_{step}"),
+                    amp_flag,
+                    max_samples=8,
+                )
             model.train()
 
         step += 1
@@ -158,7 +207,9 @@ def main():
     print("[WireSegHR][train] Done.")
 
 
-def _sample_batch_same_size(dset: WireSegDataset, batch_size: int) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+def _sample_batch_same_size(
+    dset: WireSegDataset, batch_size: int
+) -> Tuple[List[np.ndarray], List[np.ndarray]]:
     # Select a seed sample, then fill the batch with samples of the same (H,W)
     assert len(dset) > 0
     seed_idx = int(np.random.randint(0, len(dset)))
@@ -213,20 +264,35 @@ def _prepare_batch(
         if minmax is not None:
             y_min, y_max = minmax(imgf)
         else:
-            y = (0.299 * imgf[..., 0] + 0.587 * imgf[..., 1] + 0.114 * imgf[..., 2]).astype(np.float32)
+            y = (
+                0.299 * imgf[..., 0] + 0.587 * imgf[..., 1] + 0.114 * imgf[..., 2]
+            ).astype(np.float32)
             y_min, y_max = y, y
 
         # Coarse input: resize RGB + MinMax to coarse_train, pad cond+loc zeros to reach 7 channels
-        rgb_coarse = cv2.resize(imgf, (coarse_train, coarse_train), interpolation=cv2.INTER_LINEAR)
-        y_min_c = cv2.resize(y_min, (coarse_train, coarse_train), interpolation=cv2.INTER_LINEAR)
-        y_max_c = cv2.resize(y_max, (coarse_train, coarse_train), interpolation=cv2.INTER_LINEAR)
-        c = np.concatenate([
-            np.transpose(rgb_coarse, (2, 0, 1)),           # 3xHxW
-            y_min_c[None, ...],                            # 1xHxW
-            y_max_c[None, ...],                            # 1xHxW
-            np.zeros((1, coarse_train, coarse_train), np.float32),  # cond placeholder
-            np.zeros((1, coarse_train, coarse_train), np.float32),  # loc placeholder
-        ], axis=0)
+        rgb_coarse = cv2.resize(
+            imgf, (coarse_train, coarse_train), interpolation=cv2.INTER_LINEAR
+        )
+        y_min_c = cv2.resize(
+            y_min, (coarse_train, coarse_train), interpolation=cv2.INTER_LINEAR
+        )
+        y_max_c = cv2.resize(
+            y_max, (coarse_train, coarse_train), interpolation=cv2.INTER_LINEAR
+        )
+        c = np.concatenate(
+            [
+                np.transpose(rgb_coarse, (2, 0, 1)),  # 3xHxW
+                y_min_c[None, ...],  # 1xHxW
+                y_max_c[None, ...],  # 1xHxW
+                np.zeros(
+                    (1, coarse_train, coarse_train), np.float32
+                ),  # cond placeholder
+                np.zeros(
+                    (1, coarse_train, coarse_train), np.float32
+                ),  # loc placeholder
+            ],
+            axis=0,
+        )
         xs_coarse.append(torch.from_numpy(c))
 
         # Sample fine patch
@@ -258,7 +324,9 @@ def _prepare_batch(
     }
 
 
-def _build_fine_inputs(batch, cond_up: torch.Tensor, device: torch.device) -> torch.Tensor:
+def _build_fine_inputs(
+    batch, cond_up: torch.Tensor, device: torch.device
+) -> torch.Tensor:
     # Build fine input tensor Bx7xP x P from per-sample numpy buffers and upsampled cond maps
     B = cond_up.shape[0]
     P = batch["loc_patches"][0].shape[0]
@@ -277,14 +345,18 @@ def _build_fine_inputs(batch, cond_up: torch.Tensor, device: torch.device) -> to
         rgb_t = torch.from_numpy(np.transpose(rgb, (2, 0, 1)))  # 3xPxP
         ymin_t = torch.from_numpy(ymin)[None, ...]  # 1xPxP
         ymax_t = torch.from_numpy(ymax)[None, ...]  # 1xPxP
-        loc_t = torch.from_numpy(loc)[None, ...]    # 1xPxP
-        x = torch.cat([rgb_t, ymin_t, ymax_t, cond_patch.cpu(), loc_t], dim=0).float()  # 7xPxP
+        loc_t = torch.from_numpy(loc)[None, ...]  # 1xPxP
+        x = torch.cat(
+            [rgb_t, ymin_t, ymax_t, cond_patch.cpu(), loc_t], dim=0
+        ).float()  # 7xPxP
         xs.append(x)
     x_fine = torch.stack(xs, dim=0).to(device)
     return x_fine
 
 
-def _build_coarse_targets(masks: List[np.ndarray], out_h: int, out_w: int, device: torch.device) -> torch.Tensor:
+def _build_coarse_targets(
+    masks: List[np.ndarray], out_h: int, out_w: int, device: torch.device
+) -> torch.Tensor:
     ys: List[torch.Tensor] = []
     for m in masks:
         dm = downsample_label_maxpool(m, out_h, out_w)
@@ -293,17 +365,15 @@ def _build_coarse_targets(masks: List[np.ndarray], out_h: int, out_w: int, devic
     return y
 
 
-def _build_fine_targets(mask_patches: List[np.ndarray], out_h: int, out_w: int, device: torch.device) -> torch.Tensor:
+def _build_fine_targets(
+    mask_patches: List[np.ndarray], out_h: int, out_w: int, device: torch.device
+) -> torch.Tensor:
     ys: List[torch.Tensor] = []
     for m in mask_patches:
         dm = downsample_label_maxpool(m, out_h, out_w)
         ys.append(torch.from_numpy(dm.astype(np.int64)))
     y = torch.stack(ys, dim=0).to(device)  # BxHf4xWf4 with values {0,1}
     return y
-
-
-if __name__ == "__main__":
-    main()
 
 
 def set_seed(seed: int):
@@ -316,7 +386,14 @@ def set_seed(seed: int):
     cudnn.deterministic = True
 
 
-def _save_checkpoint(path: str, step: int, model: nn.Module, optim: torch.optim.Optimizer, scaler: GradScaler, best_f1: float):
+def _save_checkpoint(
+    path: str,
+    step: int,
+    model: nn.Module,
+    optim: torch.optim.Optimizer,
+    scaler: GradScaler,
+    best_f1: float,
+):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     state = {
         "step": step,
@@ -329,7 +406,13 @@ def _save_checkpoint(path: str, step: int, model: nn.Module, optim: torch.optim.
     print(f"[WireSegHR][train] Saved checkpoint: {path}")
 
 
-def _load_checkpoint(path: str, model: nn.Module, optim: torch.optim.Optimizer, scaler: GradScaler, device: torch.device) -> Tuple[int, float]:
+def _load_checkpoint(
+    path: str,
+    model: nn.Module,
+    optim: torch.optim.Optimizer,
+    scaler: GradScaler,
+    device: torch.device,
+) -> Tuple[int, float]:
     ckpt = torch.load(path, map_location=device)
     model.load_state_dict(ckpt["model"])
     optim.load_state_dict(ckpt["optim"])
@@ -343,7 +426,13 @@ def _load_checkpoint(path: str, model: nn.Module, optim: torch.optim.Optimizer, 
 
 
 @torch.no_grad()
-def validate(model: WireSegHR, dset_val: WireSegDataset, coarse_size: int, device: torch.device, amp_flag: bool) -> Dict[str, float]:
+def validate(
+    model: WireSegHR,
+    dset_val: WireSegDataset,
+    coarse_size: int,
+    device: torch.device,
+    amp_flag: bool,
+) -> Dict[str, float]:
     # Coarse-only validation: resize image to coarse_size, predict coarse logits, upsample to full and compute metrics
     model = model.to(device)
     metrics_sum = {"iou": 0.0, "f1": 0.0, "precision": 0.0, "recall": 0.0}
@@ -354,22 +443,36 @@ def validate(model: WireSegHR, dset_val: WireSegDataset, coarse_size: int, devic
         mask = item["mask"].astype(np.uint8)
         H, W = mask.shape
         # Build coarse input (zeros for cond+loc)
-        rgb_c = cv2.resize(img, (coarse_size, coarse_size), interpolation=cv2.INTER_LINEAR)
-        y = (0.299 * img[..., 0] + 0.587 * img[..., 1] + 0.114 * img[..., 2]).astype(np.float32)
-        y_min = cv2.resize(y, (coarse_size, coarse_size), interpolation=cv2.INTER_LINEAR)
+        rgb_c = cv2.resize(
+            img, (coarse_size, coarse_size), interpolation=cv2.INTER_LINEAR
+        )
+        y = (0.299 * img[..., 0] + 0.587 * img[..., 1] + 0.114 * img[..., 2]).astype(
+            np.float32
+        )
+        y_min = cv2.resize(
+            y, (coarse_size, coarse_size), interpolation=cv2.INTER_LINEAR
+        )
         y_max = y_min
-        x = np.concatenate([
-            np.transpose(rgb_c, (2, 0, 1)),
-            y_min[None, ...],
-            y_max[None, ...],
-            np.zeros((1, coarse_size, coarse_size), np.float32),
-            np.zeros((1, coarse_size, coarse_size), np.float32),
-        ], axis=0)
+        x = np.concatenate(
+            [
+                np.transpose(rgb_c, (2, 0, 1)),
+                y_min[None, ...],
+                y_max[None, ...],
+                np.zeros((1, coarse_size, coarse_size), np.float32),
+                np.zeros((1, coarse_size, coarse_size), np.float32),
+            ],
+            axis=0,
+        )
         x_t = torch.from_numpy(x)[None, ...].to(device)
         with autocast(enabled=(device.type == "cuda" and amp_flag)):
             logits_c, _ = model.forward_coarse(x_t)
         prob = torch.softmax(logits_c, dim=1)[:, 1:2]
-        prob_up = F.interpolate(prob, size=(H, W), mode="bilinear", align_corners=False)[0, 0].detach().cpu().numpy()
+        prob_up = (
+            F.interpolate(prob, size=(H, W), mode="bilinear", align_corners=False)[0, 0]
+            .detach()
+            .cpu()
+            .numpy()
+        )
         pred = (prob_up > 0.5).astype(np.uint8)
         m = compute_metrics(pred, mask)
         for k in metrics_sum:
@@ -381,30 +484,56 @@ def validate(model: WireSegHR, dset_val: WireSegDataset, coarse_size: int, devic
 
 
 @torch.no_grad()
-def save_test_visuals(model: WireSegHR, dset_test: WireSegDataset, coarse_size: int, device: torch.device, out_dir: str, amp_flag: bool, max_samples: int = 8):
+def save_test_visuals(
+    model: WireSegHR,
+    dset_test: WireSegDataset,
+    coarse_size: int,
+    device: torch.device,
+    out_dir: str,
+    amp_flag: bool,
+    max_samples: int = 8,
+):
     os.makedirs(out_dir, exist_ok=True)
     for i in range(min(max_samples, len(dset_test))):
         item = dset_test[i]
         img = item["image"].astype(np.float32) / 255.0
         H, W = img.shape[:2]
-        rgb_c = cv2.resize(img, (coarse_size, coarse_size), interpolation=cv2.INTER_LINEAR)
-        y = (0.299 * img[..., 0] + 0.587 * img[..., 1] + 0.114 * img[..., 2]).astype(np.float32)
-        y_min = cv2.resize(y, (coarse_size, coarse_size), interpolation=cv2.INTER_LINEAR)
+        rgb_c = cv2.resize(
+            img, (coarse_size, coarse_size), interpolation=cv2.INTER_LINEAR
+        )
+        y = (0.299 * img[..., 0] + 0.587 * img[..., 1] + 0.114 * img[..., 2]).astype(
+            np.float32
+        )
+        y_min = cv2.resize(
+            y, (coarse_size, coarse_size), interpolation=cv2.INTER_LINEAR
+        )
         y_max = y_min
-        x = np.concatenate([
-            np.transpose(rgb_c, (2, 0, 1)),
-            y_min[None, ...],
-            y_max[None, ...],
-            np.zeros((1, coarse_size, coarse_size), np.float32),
-            np.zeros((1, coarse_size, coarse_size), np.float32),
-        ], axis=0)
+        x = np.concatenate(
+            [
+                np.transpose(rgb_c, (2, 0, 1)),
+                y_min[None, ...],
+                y_max[None, ...],
+                np.zeros((1, coarse_size, coarse_size), np.float32),
+                np.zeros((1, coarse_size, coarse_size), np.float32),
+            ],
+            axis=0,
+        )
         x_t = torch.from_numpy(x)[None, ...].to(device)
         with autocast(enabled=(device.type == "cuda" and amp_flag)):
             logits_c, _ = model.forward_coarse(x_t)
         prob = torch.softmax(logits_c, dim=1)[:, 1:2]
-        prob_up = F.interpolate(prob, size=(H, W), mode="bilinear", align_corners=False)[0, 0].detach().cpu().numpy()
+        prob_up = (
+            F.interpolate(prob, size=(H, W), mode="bilinear", align_corners=False)[0, 0]
+            .detach()
+            .cpu()
+            .numpy()
+        )
         pred = (prob_up > 0.5).astype(np.uint8) * 255
         # Save input and prediction
         img_bgr = (img[..., ::-1] * 255.0).astype(np.uint8)
         cv2.imwrite(os.path.join(out_dir, f"{i:03d}_input.jpg"), img_bgr)
         cv2.imwrite(os.path.join(out_dir, f"{i:03d}_pred.png"), pred)
+
+
+if __name__ == "__main__":
+    main()

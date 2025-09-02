@@ -14,7 +14,9 @@ import torch.nn.functional as F
 class _ConvBNReLU(nn.Module):
     def __init__(self, in_ch: int, out_ch: int, k: int, s: int = 1, p: int = 0):
         super().__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, kernel_size=k, stride=s, padding=p, bias=False)
+        self.conv = nn.Conv2d(
+            in_ch, out_ch, kernel_size=k, stride=s, padding=p, bias=False
+        )
         self.bn = nn.BatchNorm2d(out_ch)
         self.relu = nn.ReLU(inplace=True)
 
@@ -29,7 +31,9 @@ class _SegFormerHead(nn.Module):
     def __init__(self, in_chs: List[int], embed_dim: int = 128, num_classes: int = 2):
         super().__init__()
         assert len(in_chs) == 4
-        self.proj = nn.ModuleList([nn.Conv2d(c, embed_dim, kernel_size=1) for c in in_chs])
+        self.proj = nn.ModuleList(
+            [nn.Conv2d(c, embed_dim, kernel_size=1) for c in in_chs]
+        )
         self.fuse = _ConvBNReLU(embed_dim * 4, embed_dim, k=3, p=1)
         self.cls = nn.Conv2d(embed_dim, num_classes, kernel_size=1)
 
@@ -49,10 +53,20 @@ class _SegFormerHead(nn.Module):
 
 
 class CoarseDecoder(_SegFormerHead):
-    def __init__(self, in_chs: List[int] = (64, 128, 320, 512), embed_dim: int = 128, num_classes: int = 2):
+    def __init__(
+        self,
+        in_chs: List[int] = (64, 128, 320, 512),
+        embed_dim: int = 128,
+        num_classes: int = 2,
+    ):
         super().__init__(list(in_chs), embed_dim, num_classes)
 
 
 class FineDecoder(_SegFormerHead):
-    def __init__(self, in_chs: List[int] = (64, 128, 320, 512), embed_dim: int = 128, num_classes: int = 2):
+    def __init__(
+        self,
+        in_chs: List[int] = (64, 128, 320, 512),
+        embed_dim: int = 128,
+        num_classes: int = 2,
+    ):
         super().__init__(list(in_chs), embed_dim, num_classes)

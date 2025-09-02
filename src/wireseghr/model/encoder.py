@@ -72,7 +72,9 @@ class SegFormerEncoder(nn.Module):
     def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
         if self.encoder is not None:
             feats = self.encoder(x)
-            assert isinstance(feats, (list, tuple)) and len(feats) == len(self.out_indices)
+            assert isinstance(feats, (list, tuple)) and len(feats) == len(
+                self.out_indices
+            )
             return list(feats)
         elif self.hf is not None:
             return self.hf(x)
@@ -106,7 +108,7 @@ class _TinyEncoder(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
-        c0 = self.stem(x)   # 1/4
+        c0 = self.stem(x)  # 1/4
         c1 = self.stage1(c0)  # 1/8
         c2 = self.stage2(c1)  # 1/16
         c3 = self.stage3(c2)  # 1/32
@@ -144,7 +146,9 @@ class _HFEncoderWrapper(nn.Module):
         self.feature_dims = list(self.model.config.hidden_sizes)
 
     def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
-        outputs = self.model(pixel_values=x, output_hidden_states=True, return_dict=True)
+        outputs = self.model(
+            pixel_values=x, output_hidden_states=True, return_dict=True
+        )
         feats = list(outputs.hidden_states)
         assert len(feats) == 4
         return feats
