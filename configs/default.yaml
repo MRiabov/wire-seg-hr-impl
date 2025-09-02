@@ -28,7 +28,7 @@ inference:
   stitch: avg_logits
 
 optim:
-  iters: 40000
+  iters: 2000
   batch_size: 8
   lr: 6e-5
   weight_decay: 0.01
@@ -38,8 +38,8 @@ optim:
 # training housekeeping
 seed: 42
 out_dir: runs/wireseghr
-eval_interval: 500
-ckpt_interval: 1000
+eval_interval: 30
+ckpt_interval: 100
 # resume: runs/wireseghr/ckpt_1000.pt  # optional
 
 # dataset paths (placeholders)
