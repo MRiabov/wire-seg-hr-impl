@@ -29,7 +29,7 @@ inference:
 
 optim:
   iters: 2000
-  batch_size: 8
+  batch_size: 4
   lr: 6e-5
   weight_decay: 0.01
   schedule: poly
@@ -40,7 +40,7 @@ seed: 42
 out_dir: runs/wireseghr
 eval_interval: 30
 ckpt_interval: 100
-# resume: runs/wireseghr/ckpt_1000.pt  # optional
+resume: runs/wireseghr/ckpt_1500.pt  # optional
 
 # dataset paths (placeholders)
 data:

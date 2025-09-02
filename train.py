@@ -87,6 +87,11 @@ def main():
         else None
     )
 
+    # Inference/eval settings from config
+    prob_thresh = float(cfg["inference"]["prob_threshold"])
+    mm_enable = bool(cfg["minmax"]["enable"])
+    mm_kernel = int(cfg["minmax"]["kernel"])
+
     # Model
     # Channel definition: RGB(3) + MinMax(2) + cond(1) + loc(1) = 7
     pretrained_flag = bool(cfg.get("pretrained", False))
@@ -160,7 +165,16 @@ def main():
         # Eval & Checkpoint
         if (step % eval_interval == 0) and (dset_val is not None):
             model.eval()
-            val_stats = validate(model, dset_val, coarse_train, device, amp_flag)
+            val_stats = validate(
+                model,
+                dset_val,
+                coarse_train,
+                device,
+                amp_flag,
+                prob_thresh,
+                mm_enable,
+                mm_kernel,
+            )
             print(
                 f"[Val @ {step}] IoU={val_stats['iou']:.4f} F1={val_stats['f1']:.4f} P={val_stats['precision']:.4f} R={val_stats['recall']:.4f}"
             )
@@ -194,6 +208,9 @@ def main():
                     device,
                     os.path.join(out_dir, f"test_vis_{step}"),
                     amp_flag,
+                    mm_enable,
+                    mm_kernel,
+                    prob_thresh,
                     max_samples=8,
                 )
             model.train()
@@ -461,6 +478,9 @@ def validate(
     coarse_size: int,
     device: torch.device,
     amp_flag: bool,
+    prob_thresh: float,
+    minmax_enable: bool,
+    minmax_kernel: int,
 ) -> Dict[str, float]:
     # Coarse-only validation: resize image to coarse_size, predict coarse logits, upsample to full and compute metrics
     model = model.to(device)
@@ -482,11 +502,33 @@ def validate(
             t_img, size=(coarse_size, coarse_size), mode="bilinear", align_corners=False
         )[0]
         y_t = 0.299 * t_img[:, 0:1] + 0.587 * t_img[:, 1:2] + 0.114 * t_img[:, 2:3]
-        y_c = F.interpolate(
-            y_t, size=(coarse_size, coarse_size), mode="bilinear", align_corners=False
+        if minmax_enable:
+            # Asymmetric padding for even kernel to keep same HxW
+            k = int(minmax_kernel)
+            if (k % 2) == 0:
+                pad = (k // 2 - 1, k // 2, k // 2 - 1, k // 2)
+            else:
+                pad = (k // 2, k // 2, k // 2, k // 2)
+            y_p = F.pad(y_t, pad, mode="replicate")
+            y_max_full = F.max_pool2d(y_p, kernel_size=k, stride=1)
+            y_min_full = -F.max_pool2d(-y_p, kernel_size=k, stride=1)
+        else:
+            y_min_full = y_t
+            y_max_full = y_t
+        y_min_c = F.interpolate(
+            y_min_full,
+            size=(coarse_size, coarse_size),
+            mode="bilinear",
+            align_corners=False,
+        )[0]
+        y_max_c = F.interpolate(
+            y_max_full,
+            size=(coarse_size, coarse_size),
+            mode="bilinear",
+            align_corners=False,
         )[0]
         zeros_c = torch.zeros(1, coarse_size, coarse_size, device=device)
-        x_t = torch.cat([rgb_c, y_c, y_c, zeros_c, zeros_c], dim=0).unsqueeze(0)
+        x_t = torch.cat([rgb_c, y_min_c, y_max_c, zeros_c, zeros_c], dim=0).unsqueeze(0)
         with autocast(enabled=(device.type == "cuda" and amp_flag)):
             logits_c, _ = model.forward_coarse(x_t)
         prob = torch.softmax(logits_c, dim=1)[:, 1:2]
@@ -496,7 +538,7 @@ def validate(
             .cpu()
             .numpy()
         )
-        pred = (prob_up > 0.5).astype(np.uint8)
+        pred = (prob_up > prob_thresh).astype(np.uint8)
         m = compute_metrics(pred, mask)
         for k in metrics_sum:
             metrics_sum[k] += m[k]
@@ -514,6 +556,9 @@ def save_test_visuals(
     device: torch.device,
     out_dir: str,
     amp_flag: bool,
+    minmax_enable: bool,
+    minmax_kernel: int,
+    prob_thresh: float,
     max_samples: int = 8,
 ):
     os.makedirs(out_dir, exist_ok=True)
@@ -531,11 +576,32 @@ def save_test_visuals(
             t_img, size=(coarse_size, coarse_size), mode="bilinear", align_corners=False
         )[0]
         y_t = 0.299 * t_img[:, 0:1] + 0.587 * t_img[:, 1:2] + 0.114 * t_img[:, 2:3]
-        y_c = F.interpolate(
-            y_t, size=(coarse_size, coarse_size), mode="bilinear", align_corners=False
+        if minmax_enable:
+            k = int(minmax_kernel)
+            if (k % 2) == 0:
+                pad = (k // 2 - 1, k // 2, k // 2 - 1, k // 2)
+            else:
+                pad = (k // 2, k // 2, k // 2, k // 2)
+            y_p = F.pad(y_t, pad, mode="replicate")
+            y_max_full = F.max_pool2d(y_p, kernel_size=k, stride=1)
+            y_min_full = -F.max_pool2d(-y_p, kernel_size=k, stride=1)
+        else:
+            y_min_full = y_t
+            y_max_full = y_t
+        y_min_c = F.interpolate(
+            y_min_full,
+            size=(coarse_size, coarse_size),
+            mode="bilinear",
+            align_corners=False,
+        )[0]
+        y_max_c = F.interpolate(
+            y_max_full,
+            size=(coarse_size, coarse_size),
+            mode="bilinear",
+            align_corners=False,
         )[0]
         zeros_c = torch.zeros(1, coarse_size, coarse_size, device=device)
-        x_t = torch.cat([rgb_c, y_c, y_c, zeros_c, zeros_c], dim=0).unsqueeze(0)
+        x_t = torch.cat([rgb_c, y_min_c, y_max_c, zeros_c, zeros_c], dim=0).unsqueeze(0)
         with autocast(enabled=(device.type == "cuda" and amp_flag)):
             logits_c, _ = model.forward_coarse(x_t)
         prob = torch.softmax(logits_c, dim=1)[:, 1:2]
@@ -545,7 +611,7 @@ def save_test_visuals(
             .cpu()
             .numpy()
         )
-        pred = (prob_up > 0.5).astype(np.uint8) * 255
+        pred = (prob_up > prob_thresh).astype(np.uint8) * 255
         # Save input and prediction
         img_bgr = (img[..., ::-1] * 255.0).astype(np.uint8)
         cv2.imwrite(os.path.join(out_dir, f"{i:03d}_input.jpg"), img_bgr)
