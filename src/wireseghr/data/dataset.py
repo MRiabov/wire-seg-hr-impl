@@ -46,8 +46,8 @@ class WireSegDataset:
 
     def _index_pairs(self) -> List[Tuple[Path, Path]]:
         # Convention: numeric filenames; images are .jpg/.jpeg; masks (gts) are .png
-        img_files = sorted([p for p in self.images_dir.glob("*.jpg") if p.is_file()])
-        img_files += sorted([p for p in self.images_dir.glob("*.jpeg") if p.is_file()])
+        img_files = sorted([p for p in self.images_dir.glob("*.jpg") if p.exists()])
+        img_files += sorted([p for p in self.images_dir.glob("*.jpeg") if p.exists()])
         assert len(img_files) > 0, f"No .jpg/.jpeg images in {self.images_dir}"
         pairs: List[Tuple[Path, Path]] = []
         ids: List[int] = []

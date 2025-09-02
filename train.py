@@ -15,12 +15,12 @@ import random
 import torch.backends.cudnn as cudnn
 import cv2
 
-from wireseghr.model import WireSegHR
-from wireseghr.model.minmax import MinMaxLuminance
-from wireseghr.data.dataset import WireSegDataset
-from wireseghr.model.label_downsample import downsample_label_maxpool
-from wireseghr.data.sampler import BalancedPatchSampler
-from wireseghr.metrics import compute_metrics
+from src.wireseghr.model import WireSegHR
+from src.wireseghr.model.minmax import MinMaxLuminance
+from src.wireseghr.data.dataset import WireSegDataset
+from src.wireseghr.model.label_downsample import downsample_label_maxpool
+from src.wireseghr.data.sampler import BalancedPatchSampler
+from src.wireseghr.metrics import compute_metrics
 
 
 def main():
