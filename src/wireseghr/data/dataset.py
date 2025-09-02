@@ -5,7 +5,7 @@ Pairs images in `images_dir` with masks in `masks_dir` by matching filename stem
 Mask is loaded as single-channel 0/1.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from pathlib import Path
 
@@ -20,7 +20,11 @@ class WireSegDataset:
         self.split = split
         assert self.images_dir.exists(), f"Missing images_dir: {self.images_dir}"
         assert self.masks_dir.exists(), f"Missing masks_dir: {self.masks_dir}"
-        self._items: List[tuple[Path, Path]] = self._index_pairs()
+        self._items: List[Tuple[Path, Path]] = self._index_pairs()
+        # Precompute sizes from masks (lighter to load) and build bins
+        self._sizes: List[Tuple[int, int]] = []  # (H, W) per item
+        self._size_bins: Dict[Tuple[int, int], List[int]] = {}
+        self._compute_size_bins()
 
     def __len__(self) -> int:
         return len(self._items)
@@ -40,12 +44,12 @@ class WireSegDataset:
             "mask_path": str(mask_path),
         }
 
-    def _index_pairs(self) -> List[tuple[Path, Path]]:
+    def _index_pairs(self) -> List[Tuple[Path, Path]]:
         # Convention: numeric filenames; images are .jpg/.jpeg; masks (gts) are .png
         img_files = sorted([p for p in self.images_dir.glob("*.jpg") if p.is_file()])
         img_files += sorted([p for p in self.images_dir.glob("*.jpeg") if p.is_file()])
         assert len(img_files) > 0, f"No .jpg/.jpeg images in {self.images_dir}"
-        pairs: List[tuple[Path, Path]] = []
+        pairs: List[Tuple[Path, Path]] = []
         ids: List[int] = []
         for p in img_files:
             stem = p.stem
@@ -65,3 +69,19 @@ class WireSegDataset:
             f"No numeric pairs found in {self.images_dir} and {self.masks_dir}"
         )
         return pairs
+
+    def _compute_size_bins(self) -> None:
+        sizes: List[Tuple[int, int]] = []
+        bins: Dict[Tuple[int, int], List[int]] = {}
+        for idx, (_ip, mp) in enumerate(self._items):
+            m = cv2.imread(str(mp), cv2.IMREAD_GRAYSCALE)
+            assert m is not None, f"Failed to read mask for size scan: {mp}"
+            H, W = int(m.shape[0]), int(m.shape[1])
+            sizes.append((H, W))
+            bins.setdefault((H, W), []).append(idx)
+        self._sizes = sizes
+        self._size_bins = bins
+
+    @property
+    def size_bins(self) -> Dict[Tuple[int, int], List[int]]:
+        return self._size_bins

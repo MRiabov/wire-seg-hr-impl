@@ -8,7 +8,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.cuda.amp import autocast, GradScaler
+from torch.cuda.amp import autocast
+from torch.amp import GradScaler
 from tqdm import tqdm
 import random
 import torch.backends.cudnn as cudnn
@@ -16,8 +17,8 @@ import cv2
 
 from wireseghr.model import WireSegHR
 from wireseghr.model.minmax import MinMaxLuminance
-from wireseghr.model.label_downsample import downsample_label_maxpool
 from wireseghr.data.dataset import WireSegDataset
+from wireseghr.model.label_downsample import downsample_label_maxpool
 from wireseghr.data.sampler import BalancedPatchSampler
 from wireseghr.metrics import compute_metrics
 
@@ -96,7 +97,7 @@ def main():
 
     # Optimizer and loss
     optim = torch.optim.AdamW(model.parameters(), lr=base_lr, weight_decay=weight_decay)
-    scaler = GradScaler(enabled=(device.type == "cuda" and amp_flag))
+    scaler = GradScaler("cuda", enabled=(device.type == "cuda" and amp_flag))
     ce = nn.CrossEntropyLoss()
 
     # Resume
@@ -120,30 +121,26 @@ def main():
             imgs, masks, coarse_train, patch_size, sampler, minmax, device
         )
 
-        logits_coarse, cond_map = model.forward_coarse(
-            batch["x_coarse"]
-        )  # (B,2,Hc/4,Wc/4) and (B,1,Hc/4,Wc/4)
-
-        # Upsample cond to full-res to crop the fine patch-aligned conditioning
-        B, _, hc4, wc4 = cond_map.shape
-        cond_up = F.interpolate(
-            cond_map.detach(),
-            size=(batch["full_h"], batch["full_w"]),
-            mode="bilinear",
-            align_corners=False,
-        )
-
-        # Build fine inputs: crop cond to patch, concat with patch RGB+MinMax and loc mask
-        x_fine = _build_fine_inputs(batch, cond_up, device)
-        logits_fine = model.forward_fine(x_fine)
-
-        # Targets
-        y_coarse = _build_coarse_targets(batch["mask_full"], hc4, wc4, device)
-        y_fine = _build_fine_targets(
-            batch["mask_patches"], logits_fine.shape[2], logits_fine.shape[3], device
-        )
-
         with autocast(enabled=(device.type == "cuda" and amp_flag)):
+            logits_coarse, cond_map = model.forward_coarse(
+                batch["x_coarse"]
+            )  # (B,2,Hc/4,Wc/4) and (B,1,Hc/4,Wc/4)
+
+        # Build fine inputs: crop cond from low-res map to patch, concat with patch RGB+MinMax and loc mask
+        B, _, hc4, wc4 = cond_map.shape
+        x_fine = _build_fine_inputs(batch, cond_map, device)
+        with autocast(enabled=(device.type == "cuda" and amp_flag)):
+            logits_fine = model.forward_fine(x_fine)
+
+            # Targets
+            y_coarse = _build_coarse_targets(batch["mask_full"], hc4, wc4, device)
+            y_fine = _build_fine_targets(
+                batch["mask_patches"],
+                logits_fine.shape[2],
+                logits_fine.shape[3],
+                device,
+            )
+
             loss_coarse = ce(logits_coarse, y_coarse)
             loss_fine = ce(logits_fine, y_fine)
             loss = loss_coarse + loss_fine
@@ -210,23 +207,25 @@ def main():
 def _sample_batch_same_size(
     dset: WireSegDataset, batch_size: int
 ) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-    # Select a seed sample, then fill the batch with samples of the same (H,W)
+    # Use precomputed size bins to sample a batch from a single (H, W) bin
     assert len(dset) > 0
-    seed_idx = int(np.random.randint(0, len(dset)))
-    seed_item = dset[seed_idx]
-    H, W = seed_item["image"].shape[:2]
-    imgs: List[np.ndarray] = [seed_item["image"]]
-    masks: List[np.ndarray] = [seed_item["mask"]]
-    tries = 0
-    while len(imgs) < batch_size and tries < 5000:
-        idx = int(np.random.randint(0, len(dset)))
-        item = dset[idx]
-        im = item["image"]
-        if im.shape[0] == H and im.shape[1] == W:
-            imgs.append(im)
-            masks.append(item["mask"])
-        tries += 1
-    assert len(imgs) == batch_size, "Failed to assemble same-size batch"
+    bins = dset.size_bins
+    keys = list(bins.keys())
+    random.shuffle(keys)
+    chosen_key = None
+    for hw in keys:
+        if len(bins[hw]) >= batch_size:
+            chosen_key = hw
+            break
+    assert chosen_key is not None, f"No size bin with at least {batch_size} samples"
+    pool = bins[chosen_key]
+    idxs = np.random.choice(pool, size=batch_size, replace=False)
+    imgs: List[np.ndarray] = []
+    masks: List[np.ndarray] = []
+    for idx in idxs:
+        item = dset[int(idx)]
+        imgs.append(item["image"])
+        masks.append(item["mask"])
     return imgs, masks
 
 
@@ -242,7 +241,6 @@ def _prepare_batch(
     B = len(imgs)
     assert B == len(masks)
     # Keep numpy versions for geometry and torch versions for model inputs
-    import cv2
 
     full_h = imgs[0].shape[0]
     full_w = imgs[0].shape[1]
@@ -259,55 +257,75 @@ def _prepare_batch(
     yx_list: List[tuple[int, int]] = []
 
     for img, mask in zip(imgs, masks):
-        # Float32 [0,1]
+        # Float32 [0,1] on CPU, then move to GPU for heavy ops
         imgf = img.astype(np.float32) / 255.0
+        t_img = (
+            torch.from_numpy(np.transpose(imgf, (2, 0, 1))).unsqueeze(0).to(device)
+        )  # 1x3xHxW
+
+        # Luminance and Min/Max (6x6 replicate) on GPU
+        y_t = (
+            0.299 * t_img[:, 0:1] + 0.587 * t_img[:, 1:2] + 0.114 * t_img[:, 2:3]
+        )  # 1x1xHxW
         if minmax is not None:
-            y_min, y_max = minmax(imgf)
+            # Asymmetric padding for even kernel to keep same HxW
+            y_p = F.pad(y_t, (2, 3, 2, 3), mode="replicate")
+            y_max_full = F.max_pool2d(y_p, kernel_size=6, stride=1)
+            y_min_full = -F.max_pool2d(-y_p, kernel_size=6, stride=1)
         else:
-            y = (
-                0.299 * imgf[..., 0] + 0.587 * imgf[..., 1] + 0.114 * imgf[..., 2]
-            ).astype(np.float32)
-            y_min, y_max = y, y
+            y_min_full = y_t
+            y_max_full = y_t
 
-        # Coarse input: resize RGB + MinMax to coarse_train, pad cond+loc zeros to reach 7 channels
-        rgb_coarse = cv2.resize(
-            imgf, (coarse_train, coarse_train), interpolation=cv2.INTER_LINEAR
-        )
-        y_min_c = cv2.resize(
-            y_min, (coarse_train, coarse_train), interpolation=cv2.INTER_LINEAR
-        )
-        y_max_c = cv2.resize(
-            y_max, (coarse_train, coarse_train), interpolation=cv2.INTER_LINEAR
-        )
-        c = np.concatenate(
-            [
-                np.transpose(rgb_coarse, (2, 0, 1)),  # 3xHxW
-                y_min_c[None, ...],  # 1xHxW
-                y_max_c[None, ...],  # 1xHxW
-                np.zeros(
-                    (1, coarse_train, coarse_train), np.float32
-                ),  # cond placeholder
-                np.zeros(
-                    (1, coarse_train, coarse_train), np.float32
-                ),  # loc placeholder
-            ],
-            axis=0,
-        )
-        xs_coarse.append(torch.from_numpy(c))
+        # Coarse input: resize on GPU, build 7-ch tensor
+        rgb_coarse_t = F.interpolate(
+            t_img,
+            size=(coarse_train, coarse_train),
+            mode="bilinear",
+            align_corners=False,
+        )[0]
+        y_min_c_t = F.interpolate(
+            y_min_full,
+            size=(coarse_train, coarse_train),
+            mode="bilinear",
+            align_corners=False,
+        )[0]
+        y_max_c_t = F.interpolate(
+            y_max_full,
+            size=(coarse_train, coarse_train),
+            mode="bilinear",
+            align_corners=False,
+        )[0]
+        zeros_coarse = torch.zeros(1, coarse_train, coarse_train, device=device)
+        c_t = torch.cat(
+            [rgb_coarse_t, y_min_c_t, y_max_c_t, zeros_coarse, zeros_coarse], dim=0
+        )  # 7xHc x Wc
+        xs_coarse.append(c_t)
 
-        # Sample fine patch
+        # Sample fine patch (CPU mask), then slice GPU min/max and transfer only patches
         y0, x0 = sampler.sample(imgf, mask)
         patch_rgb = imgf[y0 : y0 + patch_size, x0 : x0 + patch_size, :]
         patch_mask = mask[y0 : y0 + patch_size, x0 : x0 + patch_size]
         patches_rgb.append(patch_rgb)
         patches_mask.append(patch_mask)
-        patches_min.append(y_min[y0 : y0 + patch_size, x0 : x0 + patch_size])
-        patches_max.append(y_max[y0 : y0 + patch_size, x0 : x0 + patch_size])
+        ymin_patch = (
+            y_min_full[0, 0, y0 : y0 + patch_size, x0 : x0 + patch_size]
+            .detach()
+            .cpu()
+            .numpy()
+        )
+        ymax_patch = (
+            y_max_full[0, 0, y0 : y0 + patch_size, x0 : x0 + patch_size]
+            .detach()
+            .cpu()
+            .numpy()
+        )
+        patches_min.append(ymin_patch)
+        patches_max.append(ymax_patch)
         # Binary location mask (ones inside the patch)
         loc_masks.append(np.ones((patch_size, patch_size), dtype=np.float32))
         yx_list.append((y0, x0))
 
-    x_coarse = torch.stack(xs_coarse, dim=0).to(device)  # Bx7xHc x Wc
+    x_coarse = torch.stack(xs_coarse, dim=0)  # already on device
 
     # Store numpy arrays for fine build
     return {
@@ -325,11 +343,14 @@ def _prepare_batch(
 
 
 def _build_fine_inputs(
-    batch, cond_up: torch.Tensor, device: torch.device
+    batch, cond_map: torch.Tensor, device: torch.device
 ) -> torch.Tensor:
-    # Build fine input tensor Bx7xP x P from per-sample numpy buffers and upsampled cond maps
-    B = cond_up.shape[0]
+    # Build fine input tensor Bx7xP x P; crop cond from low-res map, upsample to P
+    B = cond_map.shape[0]
     P = batch["loc_patches"][0].shape[0]
+    full_h, full_w = batch["full_h"], batch["full_w"]
+    hc4, wc4 = cond_map.shape[2], cond_map.shape[3]
+
     xs: List[torch.Tensor] = []
     for i in range(B):
         rgb = batch["rgb_patches"][i]
@@ -338,19 +359,27 @@ def _build_fine_inputs(
         loc = batch["loc_patches"][i]
         y0, x0 = batch["patch_yx"][i]
 
-        cond_patch = cond_up[i : i + 1, :, y0 : y0 + P, x0 : x0 + P]  # 1x1xPxP
-        cond_patch = cond_patch.squeeze(1)  # 1xPxP
+        # Map full-res patch box to low-res cond grid, crop and upsample to P
+        y1, x1 = y0 + P, x0 + P
+        y0c = (y0 * hc4) // full_h
+        y1c = ((y1 * hc4) + full_h - 1) // full_h
+        x0c = (x0 * wc4) // full_w
+        x1c = ((x1 * wc4) + full_w - 1) // full_w
+        cond_sub = cond_map[i : i + 1, :, y0c:y1c, x0c:x1c].float()  # 1x1xhxw
+        cond_patch = F.interpolate(
+            cond_sub, size=(P, P), mode="bilinear", align_corners=False
+        ).squeeze(1)  # 1xPxP
 
         # Convert numpy channels to torch and concat
-        rgb_t = torch.from_numpy(np.transpose(rgb, (2, 0, 1)))  # 3xPxP
-        ymin_t = torch.from_numpy(ymin)[None, ...]  # 1xPxP
-        ymax_t = torch.from_numpy(ymax)[None, ...]  # 1xPxP
-        loc_t = torch.from_numpy(loc)[None, ...]  # 1xPxP
-        x = torch.cat(
-            [rgb_t, ymin_t, ymax_t, cond_patch.cpu(), loc_t], dim=0
-        ).float()  # 7xPxP
+        rgb_t = (
+            torch.from_numpy(np.transpose(rgb, (2, 0, 1))).to(device).float()
+        )  # 3xPxP
+        ymin_t = torch.from_numpy(ymin)[None, ...].to(device).float()  # 1xPxP
+        ymax_t = torch.from_numpy(ymax)[None, ...].to(device).float()  # 1xPxP
+        loc_t = torch.from_numpy(loc)[None, ...].to(device).float()  # 1xPxP
+        x = torch.cat([rgb_t, ymin_t, ymax_t, cond_patch, loc_t], dim=0)  # 7xPxP
         xs.append(x)
-    x_fine = torch.stack(xs, dim=0).to(device)
+    x_fine = torch.stack(xs, dim=0)
     return x_fine
 
 
@@ -442,28 +471,22 @@ def validate(
         img = item["image"].astype(np.float32) / 255.0  # HxWx3
         mask = item["mask"].astype(np.uint8)
         H, W = mask.shape
-        # Build coarse input (zeros for cond+loc)
-        rgb_c = cv2.resize(
-            img, (coarse_size, coarse_size), interpolation=cv2.INTER_LINEAR
+        # Build coarse input (zeros for cond+loc) on GPU
+        t_img = (
+            torch.from_numpy(np.transpose(img, (2, 0, 1)))
+            .unsqueeze(0)
+            .to(device)
+            .float()
         )
-        y = (0.299 * img[..., 0] + 0.587 * img[..., 1] + 0.114 * img[..., 2]).astype(
-            np.float32
-        )
-        y_min = cv2.resize(
-            y, (coarse_size, coarse_size), interpolation=cv2.INTER_LINEAR
-        )
-        y_max = y_min
-        x = np.concatenate(
-            [
-                np.transpose(rgb_c, (2, 0, 1)),
-                y_min[None, ...],
-                y_max[None, ...],
-                np.zeros((1, coarse_size, coarse_size), np.float32),
-                np.zeros((1, coarse_size, coarse_size), np.float32),
-            ],
-            axis=0,
-        )
-        x_t = torch.from_numpy(x)[None, ...].to(device)
+        rgb_c = F.interpolate(
+            t_img, size=(coarse_size, coarse_size), mode="bilinear", align_corners=False
+        )[0]
+        y_t = 0.299 * t_img[:, 0:1] + 0.587 * t_img[:, 1:2] + 0.114 * t_img[:, 2:3]
+        y_c = F.interpolate(
+            y_t, size=(coarse_size, coarse_size), mode="bilinear", align_corners=False
+        )[0]
+        zeros_c = torch.zeros(1, coarse_size, coarse_size, device=device)
+        x_t = torch.cat([rgb_c, y_c, y_c, zeros_c, zeros_c], dim=0).unsqueeze(0)
         with autocast(enabled=(device.type == "cuda" and amp_flag)):
             logits_c, _ = model.forward_coarse(x_t)
         prob = torch.softmax(logits_c, dim=1)[:, 1:2]
@@ -498,27 +521,21 @@ def save_test_visuals(
         item = dset_test[i]
         img = item["image"].astype(np.float32) / 255.0
         H, W = img.shape[:2]
-        rgb_c = cv2.resize(
-            img, (coarse_size, coarse_size), interpolation=cv2.INTER_LINEAR
+        t_img = (
+            torch.from_numpy(np.transpose(img, (2, 0, 1)))
+            .unsqueeze(0)
+            .to(device)
+            .float()
         )
-        y = (0.299 * img[..., 0] + 0.587 * img[..., 1] + 0.114 * img[..., 2]).astype(
-            np.float32
-        )
-        y_min = cv2.resize(
-            y, (coarse_size, coarse_size), interpolation=cv2.INTER_LINEAR
-        )
-        y_max = y_min
-        x = np.concatenate(
-            [
-                np.transpose(rgb_c, (2, 0, 1)),
-                y_min[None, ...],
-                y_max[None, ...],
-                np.zeros((1, coarse_size, coarse_size), np.float32),
-                np.zeros((1, coarse_size, coarse_size), np.float32),
-            ],
-            axis=0,
-        )
-        x_t = torch.from_numpy(x)[None, ...].to(device)
+        rgb_c = F.interpolate(
+            t_img, size=(coarse_size, coarse_size), mode="bilinear", align_corners=False
+        )[0]
+        y_t = 0.299 * t_img[:, 0:1] + 0.587 * t_img[:, 1:2] + 0.114 * t_img[:, 2:3]
+        y_c = F.interpolate(
+            y_t, size=(coarse_size, coarse_size), mode="bilinear", align_corners=False
+        )[0]
+        zeros_c = torch.zeros(1, coarse_size, coarse_size, device=device)
+        x_t = torch.cat([rgb_c, y_c, y_c, zeros_c, zeros_c], dim=0).unsqueeze(0)
         with autocast(enabled=(device.type == "cuda" and amp_flag)):
             logits_c, _ = model.forward_coarse(x_t)
         prob = torch.softmax(logits_c, dim=1)[:, 1:2]
