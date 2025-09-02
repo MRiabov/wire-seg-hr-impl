@@ -1,0 +1,337 @@
+\begin{thebibliography}{10}\itemsep=-1pt
+
+\bibitem{Pixel6as49}
+Pixel 6, a smarter chip for a smarter phone - google store.
+\newblock \url{https://store.google.com/product/pixel_6?hl=en-US}.
+\newblock (Accessed on 11/14/2021).
+
+\bibitem{ttpla}
+Rabab Abdelfattah, Xiaofeng Wang, and Song Wang.
+\newblock Ttpla: An aerial-image dataset for detection and segmentation of
+  transmission towers and power lines.
+\newblock In {\em Proceedings of the Asian Conference on Computer Vision},
+  2020.
+
+\bibitem{barnes2009patchmatch}
+Connelly Barnes, Eli Shechtman, Adam Finkelstein, and Dan~B Goldman.
+\newblock Patchmatch: A randomized correspondence algorithm for structural
+  image editing.
+\newblock {\em ACM Trans. Graph.}, 28(3):24, 2009.
+
+\bibitem{deeplab}
+Liang-Chieh Chen, George Papandreou, Iasonas Kokkinos, Kevin Murphy, and Alan~L
+  Yuille.
+\newblock Deeplab: Semantic image segmentation with deep convolutional nets,
+  atrous convolution, and fully connected crfs.
+\newblock {\em IEEE transactions on pattern analysis and machine intelligence},
+  40(4):834--848, 2017.
+
+\bibitem{deeplabv3}
+Liang-Chieh Chen, George Papandreou, Florian Schroff, and Hartwig Adam.
+\newblock Rethinking atrous convolution for semantic image segmentation.
+\newblock {\em arXiv preprint arXiv:1706.05587}, 2017.
+
+\bibitem{deeplabv3p}
+Liang-Chieh Chen, Yukun Zhu, George Papandreou, Florian Schroff, and Hartwig
+  Adam.
+\newblock Encoder-decoder with atrous separable convolution for semantic image
+  segmentation.
+\newblock In {\em Proceedings of the European conference on computer vision
+  (ECCV)}, pages 801--818, 2018.
+
+\bibitem{glnet}
+Wuyang Chen, Ziyu Jiang, Zhangyang Wang, Kexin Cui, and Xiaoning Qian.
+\newblock Collaborative global-local networks for memory-efficient segmentation
+  of ultra-high resolution images.
+\newblock In {\em Proceedings of the IEEE/CVF Conference on Computer Vision and
+  Pattern Recognition}, pages 8924--8933, 2019.
+
+\bibitem{cascadepsp}
+Ho~Kei Cheng, Jihoon Chung, Yu-Wing Tai, and Chi-Keung Tang.
+\newblock Cascadepsp: toward class-agnostic and very high-resolution
+  segmentation via global and local refinement.
+\newblock In {\em Proceedings of the IEEE/CVF Conference on Computer Vision and
+  Pattern Recognition}, pages 8890--8899, 2020.
+
+\bibitem{darabi2012image}
+Soheil Darabi, Eli Shechtman, Connelly Barnes, Dan~B Goldman, and Pradeep Sen.
+\newblock Image melding: Combining inconsistent images using patch-based
+  synthesis.
+\newblock {\em ACM Transactions on graphics (TOG)}, 31(4):1--10, 2012.
+
+\bibitem{isdnet}
+Shaohua Guo, Liang Liu, Zhenye Gan, Yabiao Wang, Wuhao Zhang, Chengjie Wang,
+  Guannan Jiang, Wei Zhang, Ran Yi, Lizhuang Ma, et~al.
+\newblock Isdnet: Integrating shallow and deep networks for efficient
+  ultra-high resolution segmentation.
+\newblock In {\em Proceedings of the IEEE/CVF Conference on Computer Vision and
+  Pattern Recognition}, pages 4361--4370, 2022.
+
+\bibitem{hassani2022dilated}
+Ali Hassani and Humphrey Shi.
+\newblock Dilated neighborhood attention transformer.
+\newblock 2022.
+
+\bibitem{hassani2022neighborhood}
+Ali Hassani, Steven Walton, Jiachen Li, Shen Li, and Humphrey Shi.
+\newblock Neighborhood attention transformer.
+\newblock 2022.
+
+\bibitem{resnet}
+Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun.
+\newblock Deep residual learning for image recognition.
+\newblock In {\em Proceedings of the IEEE conference on computer vision and
+  pattern recognition}, pages 770--778, 2016.
+
+\bibitem{ccnet}
+Zilong Huang, Xinggang Wang, Lichao Huang, Chang Huang, Yunchao Wei, and Wenyu
+  Liu.
+\newblock Ccnet: Criss-cross attention for semantic segmentation.
+\newblock In {\em Proceedings of the IEEE/CVF International Conference on
+  Computer Vision}, pages 603--612, 2019.
+
+\bibitem{magnet}
+Chuong Huynh, Anh~Tuan Tran, Khoa Luu, and Minh Hoai.
+\newblock Progressive semantic segmentation.
+\newblock In {\em Proceedings of the IEEE/CVF Conference on Computer Vision and
+  Pattern Recognition}, pages 16755--16764, 2021.
+
+\bibitem{globallocal}
+Satoshi Iizuka, Edgar Simo-Serra, and Hiroshi Ishikawa.
+\newblock Globally and locally consistent image completion.
+\newblock {\em ACM Transactions on Graphics (ToG)}, 36(4):1--14, 2017.
+
+\bibitem{jain2022oneformer}
+Jitesh Jain, Jiachen Li, MangTik Chiu, Ali Hassani, Nikita Orlov, and Humphrey
+  Shi.
+\newblock {OneFormer: One Transformer to Rule Universal Image Segmentation}.
+\newblock 2023.
+
+\bibitem{jain2021semask}
+Jitesh Jain, Anukriti Singh, Nikita Orlov, Zilong Huang, Jiachen Li, Steven
+  Walton, and Humphrey Shi.
+\newblock Semask: Semantically masking transformer backbones for effective
+  semantic segmentation.
+\newblock {\em arXiv}, 2021.
+
+\bibitem{jain2022keys}
+Jitesh Jain, Yuqian Zhou, Ning Yu, and Humphrey Shi.
+\newblock Keys to better image inpainting: Structure and texture go hand in
+  hand.
+\newblock {\em arXiv preprint arXiv:2208.03382}, 2022.
+
+\bibitem{swiftlane}
+Oshada Jayasinghe, Damith Anhettigama, Sahan Hemachandra, Shenali Kariyawasam,
+  Ranga Rodrigo, and Peshala Jayasekara.
+\newblock Swiftlane: Towards fast and efficient lane detection.
+\newblock {\em arXiv preprint arXiv:2110.11779}, 2021.
+
+\bibitem{karras2020analyzing}
+Tero Karras, Samuli Laine, Miika Aittala, Janne Hellsten, Jaakko Lehtinen, and
+  Timo Aila.
+\newblock Analyzing and improving the image quality of stylegan.
+\newblock In {\em Proceedings of the IEEE/CVF conference on computer vision and
+  pattern recognition}, pages 8110--8119, 2020.
+
+\bibitem{kaspar2015self}
+Alexandre Kaspar, Boris Neubert, Dani Lischinski, Mark Pauly, and Johannes
+  Kopf.
+\newblock Self tuning texture optimization.
+\newblock In {\em Computer Graphics Forum}, volume~34, pages 349--359. Wiley
+  Online Library, 2015.
+
+\bibitem{cable_inst}
+Bo Li, Cheng Chen, Shiwen Dong, and Junfeng Qiao.
+\newblock Transmission line detection in aerial images: An instance
+  segmentation approach based on multitask neural networks.
+\newblock {\em Signal Processing: Image Communication}, 96:116278, 2021.
+
+\bibitem{focal}
+Tsung-Yi Lin, Priya Goyal, Ross Girshick, Kaiming He, and Piotr Doll{\'a}r.
+\newblock Focal loss for dense object detection.
+\newblock In {\em Proceedings of the IEEE international conference on computer
+  vision}, pages 2980--2988, 2017.
+
+\bibitem{partialconv}
+Guilin Liu, Fitsum~A Reda, Kevin~J Shih, Ting-Chun Wang, Andrew Tao, and Bryan
+  Catanzaro.
+\newblock Image inpainting for irregular holes using partial convolutions.
+\newblock In {\em Proceedings of the European conference on computer vision
+  (ECCV)}, pages 85--100, 2018.
+
+\bibitem{swin}
+Ze Liu, Yutong Lin, Yue Cao, Han Hu, Yixuan Wei, Zheng Zhang, Stephen Lin, and
+  Baining Guo.
+\newblock Swin transformer: Hierarchical vision transformer using shifted
+  windows.
+\newblock {\em arXiv preprint arXiv:2103.14030}, 2021.
+
+\bibitem{adamw}
+Ilya Loshchilov and Frank Hutter.
+\newblock Decoupled weight decay regularization.
+\newblock {\em arXiv preprint arXiv:1711.05101}, 2017.
+
+\bibitem{lsnet}
+Van~Nhan Nguyen, Robert Jenssen, and Davide Roverso.
+\newblock Ls-net: Fast single-shot line-segment detector.
+\newblock {\em arXiv preprint arXiv:1912.09532}, 2019.
+
+\bibitem{contextencoder}
+Deepak Pathak, Philipp Krahenbuhl, Jeff Donahue, Trevor Darrell, and Alexei~A
+  Efros.
+\newblock Context encoders: Feature learning by inpainting.
+\newblock In {\em Proceedings of the IEEE conference on computer vision and
+  pattern recognition}, pages 2536--2544, 2016.
+
+\bibitem{dalle}
+Aditya Ramesh, Prafulla Dhariwal, Alex Nichol, Casey Chu, and Mark Chen.
+\newblock Hierarchical text-conditional image generation with clip latents.
+\newblock {\em arXiv preprint arXiv:2204.06125}, 2022.
+
+\bibitem{dpt}
+Ren{\'e} Ranftl, Alexey Bochkovskiy, and Vladlen Koltun.
+\newblock Vision transformers for dense prediction.
+\newblock In {\em Proceedings of the IEEE/CVF International Conference on
+  Computer Vision}, pages 12179--12188, 2021.
+
+\bibitem{rombach2022high}
+Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj{\"o}rn
+  Ommer.
+\newblock High-resolution image synthesis with latent diffusion models.
+\newblock In {\em Proceedings of the IEEE/CVF Conference on Computer Vision and
+  Pattern Recognition}, pages 10684--10695, 2022.
+
+\bibitem{ohem}
+Abhinav Shrivastava, Abhinav Gupta, and Ross Girshick.
+\newblock Training region-based object detectors with online hard example
+  mining.
+\newblock In {\em Proceedings of the IEEE conference on computer vision and
+  pattern recognition}, pages 761--769, 2016.
+
+\bibitem{structurelane}
+Jinming Su, Chao Chen, Ke Zhang, Junfeng Luo, Xiaoming Wei, and Xiaolin Wei.
+\newblock Structure guided lane detection.
+\newblock {\em arXiv preprint arXiv:2105.05403}, 2021.
+
+\bibitem{suvorov2022resolution}
+Roman Suvorov, Elizaveta Logacheva, Anton Mashikhin, Anastasia Remizova,
+  Arsenii Ashukha, Aleksei Silvestrov, Naejin Kong, Harshith Goka, Kiwoong
+  Park, and Victor Lempitsky.
+\newblock Resolution-robust large mask inpainting with fourier convolutions.
+\newblock In {\em Proceedings of the IEEE/CVF Winter Conference on Applications
+  of Computer Vision}, pages 2149--2159, 2022.
+
+\bibitem{lanedet}
+Lucas Tabelini, Rodrigo Berriel, Thiago~M Paixao, Claudine Badue, Alberto~F
+  De~Souza, and Thiago Oliveira-Santos.
+\newblock Keep your eyes on the lane: Real-time attention-guided lane
+  detection.
+\newblock In {\em Proceedings of the IEEE/CVF Conference on Computer Vision and
+  Pattern Recognition}, pages 294--302, 2021.
+
+\bibitem{attention}
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones,
+  Aidan~N Gomez, {\L}ukasz Kaiser, and Illia Polosukhin.
+\newblock Attention is all you need.
+\newblock In {\em Advances in neural information processing systems}, pages
+  5998--6008, 2017.
+
+\bibitem{wexler2007space}
+Yonatan Wexler, Eli Shechtman, and Michal Irani.
+\newblock Space-time completion of video.
+\newblock {\em IEEE Transactions on pattern analysis and machine intelligence},
+  29(3):463--476, 2007.
+
+\bibitem{segformer}
+Enze Xie, Wenhai Wang, Zhiding Yu, Anima Anandkumar, Jose~M Alvarez, and Ping
+  Luo.
+\newblock Segformer: Simple and efficient design for semantic segmentation with
+  transformers.
+\newblock {\em arXiv preprint arXiv:2105.15203}, 2021.
+
+\bibitem{xu2022image}
+Xingqian Xu, Shant Navasardyan, Vahram Tadevosyan, Andranik Sargsyan, Yadong
+  Mu, and Humphrey Shi.
+\newblock Image completion with heterogeneously filtered spectral hints.
+\newblock In {\em WACV}, 2023.
+
+\bibitem{powerlinedataset}
+{\"O}mer~Emre Yetgin, {\"O}mer~Nezih Gerek, and {\"O}mer Nezih.
+\newblock Power image dataset (infrared-ir and visible light-vl).
+\newblock {\em Mendeley Data}, 8, 2017.
+
+\bibitem{hifill}
+Zili Yi, Qiang Tang, Shekoofeh Azizi, Daesik Jang, and Zhan Xu.
+\newblock Contextual residual aggregation for ultra high-resolution image
+  inpainting.
+\newblock In {\em Proceedings of the IEEE/CVF Conference on Computer Vision and
+  Pattern Recognition}, pages 7508--7517, 2020.
+
+\bibitem{contextual}
+Jiahui Yu, Zhe Lin, Jimei Yang, Xiaohui Shen, Xin Lu, and Thomas~S Huang.
+\newblock Generative image inpainting with contextual attention.
+\newblock In {\em Proceedings of the IEEE conference on computer vision and
+  pattern recognition}, pages 5505--5514, 2018.
+
+\bibitem{yu2019free}
+Jiahui Yu, Zhe Lin, Jimei Yang, Xiaohui Shen, Xin Lu, and Thomas~S Huang.
+\newblock Free-form image inpainting with gated convolution.
+\newblock In {\em Proceedings of the IEEE/CVF international conference on
+  computer vision}, pages 4471--4480, 2019.
+
+\bibitem{zeng2020high}
+Yu Zeng, Zhe Lin, Jimei Yang, Jianming Zhang, Eli Shechtman, and Huchuan Lu.
+\newblock High-resolution image inpainting with iterative confidence feedback
+  and guided upsampling.
+\newblock In {\em European conference on computer vision}, pages 1--17.
+  Springer, 2020.
+
+\bibitem{pldu}
+Heng Zhang, Wen Yang, Huai Yu, Haijian Zhang, and Gui-Song Xia.
+\newblock Detecting power lines in uav images with convolutional features and
+  structured constraints.
+\newblock {\em Remote Sensing}, 11(11):1342, 2019.
+
+\bibitem{supercaf}
+Lingzhi Zhang, Connelly Barnes, Kevin Wampler, Sohrab Amirghodsi, Eli
+  Shechtman, Zhe Lin, and Jianbo Shi.
+\newblock Inpainting at modern camera resolution by guided patchmatch with
+  auto-curation.
+\newblock In {\em European Conference on Computer Vision}, pages 51--67.
+  Springer, 2022.
+
+\bibitem{pspnet}
+Hengshuang Zhao, Jianping Shi, Xiaojuan Qi, Xiaogang Wang, and Jiaya Jia.
+\newblock Pyramid scene parsing network.
+\newblock In {\em Proceedings of the IEEE conference on computer vision and
+  pattern recognition}, pages 2881--2890, 2017.
+
+\bibitem{comodgan}
+Shengyu Zhao, Jonathan Cui, Yilun Sheng, Yue Dong, Xiao Liang, Eric~I Chang,
+  and Yan Xu.
+\newblock Large scale image completion via co-modulated generative adversarial
+  networks.
+\newblock {\em arXiv preprint arXiv:2103.10428}, 2021.
+
+\bibitem{zheng2022cm}
+Haitian Zheng, Zhe Lin, Jingwan Lu, Scott Cohen, Eli Shechtman, Connelly
+  Barnes, Jianming Zhang, Ning Xu, Sohrab Amirghodsi, and Jiebo Luo.
+\newblock Cm-gan: Image inpainting with cascaded modulation gan and
+  object-aware training.
+\newblock {\em arXiv preprint arXiv:2203.11947}, 2022.
+
+\bibitem{setr}
+Sixiao Zheng, Jiachen Lu, Hengshuang Zhao, Xiatian Zhu, Zekun Luo, Yabiao Wang,
+  Yanwei Fu, Jianfeng Feng, Tao Xiang, Philip~HS Torr, et~al.
+\newblock Rethinking semantic segmentation from a sequence-to-sequence
+  perspective with transformers.
+\newblock In {\em Proceedings of the IEEE/CVF Conference on Computer Vision and
+  Pattern Recognition}, pages 6881--6890, 2021.
+
+\bibitem{zhou2017places}
+Bolei Zhou, Agata Lapedriza, Aditya Khosla, Aude Oliva, and Antonio Torralba.
+\newblock Places: A 10 million image database for scene recognition.
+\newblock {\em IEEE Transactions on Pattern Analysis and Machine Intelligence},
+  2017.
+
+\end{thebibliography}

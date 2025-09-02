@@ -1,0 +1,24 @@
+\begin{thebibliography}{1}\itemsep=-1pt
+
+\bibitem{cascadepsp}
+Ho~Kei Cheng, Jihoon Chung, Yu-Wing Tai, and Chi-Keung Tang.
+\newblock Cascadepsp: toward class-agnostic and very high-resolution
+  segmentation via global and local refinement.
+\newblock In {\em Proceedings of the IEEE/CVF Conference on Computer Vision and
+  Pattern Recognition}, pages 8890--8899, 2020.
+
+\bibitem{isdnet}
+Shaohua Guo, Liang Liu, Zhenye Gan, Yabiao Wang, Wuhao Zhang, Chengjie Wang,
+  Guannan Jiang, Wei Zhang, Ran Yi, Lizhuang Ma, et~al.
+\newblock Isdnet: Integrating shallow and deep networks for efficient
+  ultra-high resolution segmentation.
+\newblock In {\em Proceedings of the IEEE/CVF Conference on Computer Vision and
+  Pattern Recognition}, pages 4361--4370, 2022.
+
+\bibitem{magnet}
+Chuong Huynh, Anh~Tuan Tran, Khoa Luu, and Minh Hoai.
+\newblock Progressive semantic segmentation.
+\newblock In {\em Proceedings of the IEEE/CVF Conference on Computer Vision and
+  Pattern Recognition}, pages 16755--16764, 2021.
+
+\end{thebibliography}
