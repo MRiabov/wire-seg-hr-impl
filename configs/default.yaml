@@ -27,8 +27,8 @@ inference:
   stitch: avg_logits
 
 eval:
-  max_samples: 32
-  fine_batch: 32
+  max_samples: 16
+  fine_batch: 48
 
 optim:
   iters: 2000

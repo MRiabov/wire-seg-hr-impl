@@ -524,8 +524,10 @@ def set_seed(seed: int):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    cudnn.benchmark = False
-    cudnn.deterministic = True
+    # cudnn.benchmark = False
+    # cudnn.deterministic = True
+    cudnn.benchmark = True
+    cudnn.deterministic = False
 
 
 def _save_checkpoint(
@@ -687,7 +689,7 @@ def validate(
             batch_idx = i0 // fine_batch
             if total_batches > 0 and (batch_idx % max(1, total_batches // 10) == 0):
                 print(
-                    f"[Eval] Image {i+1}/{target_n} tiles {batch_idx}/{total_batches}",
+                    f"[Eval] Img {i+1}/{target_n} | Tile batch {batch_idx+1}/{total_batches}",
                     flush=True,
                 )
             for (y0, x0) in batch_coords:
