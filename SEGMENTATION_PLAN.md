@@ -108,7 +108,7 @@ Focus: segmentation only (no dataset collection or inpainting).
 ## Configuration Surface (key)
 - Backbone/weights: `mit_b2` (pretrained ImageNet-1K).
 - Sizes: `p=768`, `coarse_train=512`, `coarse_test=1024`, `overlap=128`.
-- Conditioning: `use_binary_location=true`, `cond_from='coarse_logits_1x1'`, `cond_crop='patch'`.
+- Conditioning: `cond_from='coarse_logits_1x1'`, `cond_crop='patch'`.
 - MinMax: `enable=true`, `kernel=6`.
 - Label: `coarse_label_downsample='maxpool'`.
 - Training: `iters=40000`, `batch=8`, `lr=6e-5`, `wd=0.01`, `schedule='poly'`, `power=1.0`.

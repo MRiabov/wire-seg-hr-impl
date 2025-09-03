@@ -37,9 +37,9 @@ optim:
 # training housekeeping
 seed: 42
 out_dir: runs/wireseghr
-eval_interval: 30
-ckpt_interval: 100
-resume: runs/wireseghr/ckpt_1500.pt  # optional
+eval_interval: 100
+ckpt_interval: 300
+# resume: runs/wireseghr/ckpt_1500.pt  # optional
 
 # dataset paths (placeholders)
 data:
