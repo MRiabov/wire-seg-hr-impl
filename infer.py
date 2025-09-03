@@ -1,7 +1,8 @@
 import argparse
 import os
 import pprint
-from typing import List, Tuple, Optional
+import time
+from typing import List, Tuple, Optional, Dict, Any
 import yaml
 
 import numpy as np
@@ -257,6 +258,42 @@ def main():
     parser.add_argument(
         "--save_prob", action="store_true", help="Also save probability .npy"
     )
+    # Benchmarking options
+    parser.add_argument(
+        "--benchmark",
+        action="store_true",
+        help="Run benchmarking on a directory (defaults to cfg.data.test_images)",
+    )
+    parser.add_argument(
+        "--bench_images_dir",
+        type=str,
+        default="",
+        help="Images dir for benchmark (overrides cfg.data.test_images if set)",
+    )
+    parser.add_argument(
+        "--bench_limit",
+        type=int,
+        default=0,
+        help="Limit number of images for benchmark (0 means all)",
+    )
+    parser.add_argument(
+        "--bench_warmup",
+        type=int,
+        default=2,
+        help="Number of warmup images (excluded from stats)",
+    )
+    parser.add_argument(
+        "--bench_size_filter",
+        type=str,
+        default="",
+        help="Only benchmark images matching HxW, e.g. 3000x4000",
+    )
+    parser.add_argument(
+        "--bench_report_json",
+        type=str,
+        default="",
+        help="Optional path to save JSON report of timings",
+    )
 
     args = parser.parse_args()
 
@@ -270,9 +307,11 @@ def main():
     print("[WireSegHR][infer] Loaded config from:", cfg_path)
     pprint.pprint(cfg)
 
-    assert (args.image is not None) ^ (args.images_dir is not None), (
-        "Provide exactly one of --image or --images_dir"
-    )
+    # If benchmarking, do not require --image/--images_dir
+    if not args.benchmark:
+        assert (args.image is not None) ^ (args.images_dir is not None), (
+            "Provide exactly one of --image or --images_dir"
+        )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     precision = str(cfg["optim"].get("precision", "fp32")).lower()
@@ -293,6 +332,165 @@ def main():
         state = torch.load(ckpt_path, map_location=device)
         model.load_state_dict(state["model"])
     model.eval()
+
+    # Benchmark mode
+    if args.benchmark:
+        if args.bench_images_dir:
+            bench_dir = args.bench_images_dir
+        else:
+            bench_dir = cfg["data"]["test_images"]
+        assert os.path.isdir(bench_dir), f"Not a directory: {bench_dir}"
+
+        size_filter: Optional[Tuple[int, int]] = None
+        if args.bench_size_filter:
+            try:
+                h_str, w_str = args.bench_size_filter.lower().split("x")
+                size_filter = (int(h_str), int(w_str))
+            except Exception:
+                raise AssertionError(
+                    f"Invalid --bench_size_filter format: {args.bench_size_filter} (use HxW)"
+                )
+
+        img_files = sorted(
+            [
+                os.path.join(bench_dir, p)
+                for p in os.listdir(bench_dir)
+                if p.lower().endswith((".jpg", ".jpeg"))
+            ]
+        )
+        assert len(img_files) > 0, f"No .jpg/.jpeg in {bench_dir}"
+
+        # Filter by size if requested
+        if size_filter is not None:
+            filt_files: List[str] = []
+            for p in img_files:
+                bgr = cv2.imread(p, cv2.IMREAD_COLOR)
+                assert bgr is not None, f"Failed to read {p}"
+                if bgr.shape[0] == size_filter[0] and bgr.shape[1] == size_filter[1]:
+                    filt_files.append(p)
+            img_files = filt_files
+            assert len(img_files) > 0, (
+                f"No images matching {size_filter[0]}x{size_filter[1]} in {bench_dir}"
+            )
+
+        if args.bench_limit > 0:
+            img_files = img_files[: args.bench_limit]
+
+        print(f"[WireSegHR][bench] Images: {len(img_files)} from {bench_dir}")
+        print(f"[WireSegHR][bench] Warmup: {args.bench_warmup}")
+
+        def _sync():
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+
+        timings: List[Dict[str, Any]] = []
+
+        # Warmup
+        for i in range(min(args.bench_warmup, len(img_files))):
+            _ = infer_image(
+                model,
+                img_files[i],
+                cfg,
+                device,
+                amp_enabled,
+                amp_dtype,
+                out_dir=None,
+                save_prob=False,
+            )
+
+        # Timed runs
+        for p in img_files[args.bench_warmup :]:
+            # Replicate internals to time coarse vs fine separately
+            bgr = cv2.imread(p, cv2.IMREAD_COLOR)
+            assert bgr is not None, f"Failed to read {p}"
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+
+            coarse_size = int(cfg["coarse"]["test_size"])
+            minmax_enable = bool(cfg["minmax"]["enable"])
+            minmax_kernel = int(cfg["minmax"]["kernel"])
+
+            _sync(); t0 = time.perf_counter()
+            prob_c, cond_map, t_img, y_min_full, y_max_full = _coarse_forward(
+                model,
+                rgb,
+                coarse_size,
+                minmax_enable,
+                minmax_kernel,
+                device,
+                amp_enabled,
+                amp_dtype,
+            )
+            _sync(); t1 = time.perf_counter()
+
+            patch_size = int(cfg["inference"]["fine_patch_size"])  # 1024
+            overlap = int(cfg["fine"]["overlap"])
+
+            prob_f = _tiled_fine_forward(
+                model,
+                t_img,
+                cond_map,
+                y_min_full,
+                y_max_full,
+                patch_size,
+                overlap,
+                int(cfg.get("eval", {}).get("fine_batch", 16)),
+                device,
+                amp_enabled,
+                amp_dtype,
+            )
+            _sync(); t2 = time.perf_counter()
+
+            timings.append(
+                {
+                    "path": p,
+                    "H": int(t_img.shape[2]),
+                    "W": int(t_img.shape[3]),
+                    "t_coarse_ms": (t1 - t0) * 1000.0,
+                    "t_fine_ms": (t2 - t1) * 1000.0,
+                    "t_total_ms": (t2 - t0) * 1000.0,
+                }
+            )
+
+        if len(timings) == 0:
+            print("[WireSegHR][bench] Nothing to benchmark after warmup.")
+            return
+
+        def _agg(key: str) -> Tuple[float, float, float]:
+            vals = sorted([t[key] for t in timings])
+            n = len(vals)
+            p50 = vals[n // 2]
+            p95 = vals[min(n - 1, int(0.95 * (n - 1)))]
+            avg = sum(vals) / n
+            return avg, p50, p95
+
+        avg_c, p50_c, p95_c = _agg("t_coarse_ms")
+        avg_f, p50_f, p95_f = _agg("t_fine_ms")
+        avg_t, p50_t, p95_t = _agg("t_total_ms")
+
+        print("[WireSegHR][bench] Results (ms):")
+        print(f"  Coarse  avg={avg_c:.2f}  p50={p50_c:.2f}  p95={p95_c:.2f}")
+        print(f"  Fine    avg={avg_f:.2f}  p50={p50_f:.2f}  p95={p95_f:.2f}")
+        print(f"  Total   avg={avg_t:.2f}  p50={p50_t:.2f}  p95={p95_t:.2f}")
+        print(f"  Target  < 1000 ms per 3000x4000 image: {'YES' if p50_t < 1000.0 else 'NO'}")
+
+        if args.bench_report_json:
+            import json
+
+            report = {
+                "summary": {
+                    "avg_ms": avg_t,
+                    "p50_ms": p50_t,
+                    "p95_ms": p95_t,
+                    "avg_coarse_ms": avg_c,
+                    "avg_fine_ms": avg_f,
+                    "images": len(timings),
+                },
+                "per_image": timings,
+            }
+            with open(args.bench_report_json, "w") as f:
+                json.dump(report, f, indent=2)
+
+        return
 
     if args.image is not None:
         infer_image(
