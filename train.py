@@ -373,6 +373,28 @@ def main():
         print(
             f"[Test Final][Coarse] IoU={test_stats['iou_coarse']:.4f} F1={test_stats['f1_coarse']:.4f} P={test_stats['precision_coarse']:.4f} R={test_stats['recall_coarse']:.4f}"
         )
+        # Save final evaluation artifacts
+        final_out = os.path.join(out_dir, f"final_vis_{step}")
+        os.makedirs(final_out, exist_ok=True)
+        # Dump metrics for record
+        with open(os.path.join(final_out, "metrics.yaml"), "w") as f:
+            yaml.safe_dump({**test_stats, "step": step}, f, sort_keys=False)
+        # Save predictions (fine + coarse) for the whole test set
+        save_final_visuals(
+            model,
+            dset_test,
+            coarse_test,
+            device,
+            final_out,
+            amp_enabled,
+            amp_dtype,
+            prob_thresh,
+            mm_enable,
+            mm_kernel,
+            eval_patch_size,
+            overlap,
+            eval_fine_batch,
+        )
         model.train()
 
     print("[WireSegHR][train] Done.")
@@ -762,6 +784,62 @@ def save_test_visuals(
         img_bgr = (img[..., ::-1] * 255.0).astype(np.uint8)
         cv2.imwrite(os.path.join(out_dir, f"{i:03d}_input.jpg"), img_bgr)
         cv2.imwrite(os.path.join(out_dir, f"{i:03d}_pred.png"), pred)
+
+
+@torch.no_grad()
+def save_final_visuals(
+    model: WireSegHR,
+    dset_test: WireSegDataset,
+    coarse_size: int,
+    device: torch.device,
+    out_dir: str,
+    amp_flag: bool,
+    amp_dtype,
+    prob_thresh: float,
+    minmax_enable: bool,
+    minmax_kernel: int,
+    fine_patch_size: int,
+    fine_overlap: int,
+    fine_batch: int,
+):
+    os.makedirs(out_dir, exist_ok=True)
+    for i in range(len(dset_test)):
+        item = dset_test[i]
+        img = item["image"].astype(np.float32) / 255.0
+        H, W = img.shape[:2]
+        # Coarse pass
+        prob_up, cond_map, t_img, y_min_full, y_max_full = _coarse_forward(
+            model,
+            img,
+            int(coarse_size),
+            bool(minmax_enable),
+            int(minmax_kernel),
+            device,
+            bool(amp_flag),
+            amp_dtype,
+        )
+        pred_coarse = ((prob_up > prob_thresh).to(torch.uint8) * 255).cpu().numpy()
+        # Fine pass (tiled)
+        prob_full = _tiled_fine_forward(
+            model,
+            t_img,
+            cond_map,
+            y_min_full,
+            y_max_full,
+            int(fine_patch_size),
+            int(fine_overlap),
+            int(fine_batch),
+            device,
+            bool(amp_flag),
+            amp_dtype,
+        )
+        pred_fine = ((prob_full > prob_thresh).to(torch.uint8) * 255).cpu().numpy()
+        # Save input and predictions
+        img_bgr = (img[..., ::-1] * 255.0).astype(np.uint8)
+        base = f"{i:03d}"
+        cv2.imwrite(os.path.join(out_dir, f"{base}_input.jpg"), img_bgr)
+        cv2.imwrite(os.path.join(out_dir, f"{base}_coarse_pred.png"), pred_coarse)
+        cv2.imwrite(os.path.join(out_dir, f"{base}_fine_pred.png"), pred_fine)
 
 
 if __name__ == "__main__":
