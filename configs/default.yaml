@@ -28,8 +28,8 @@ inference:
   stitch: avg_logits
 
 eval:
-  max_samples: 16
-  fine_batch: 32
+  max_samples: 12
+  fine_batch: 16
 
 optim:
   iters: 2000
@@ -38,14 +38,14 @@ optim:
   weight_decay: 0.01
   schedule: poly
   power: 1.0
-  precision: fp32  # one of: fp32, fp16, bf16
+  precision: bf16  # one of: fp32, fp16, bf16
 
 # training housekeeping
 seed: 42
 out_dir: runs/wireseghr
-eval_interval: 100
+eval_interval: 150
 ckpt_interval: 300
-resume: runs/wireseghr/ckpt_1800.pt  # optional
+# resume: runs/wireseghr/ckpt_1800.pt  # optional
 
 # dataset paths (placeholders)
 data:

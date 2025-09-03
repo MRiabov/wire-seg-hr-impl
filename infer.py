@@ -31,7 +31,7 @@ def _coarse_forward(
     device: torch.device,
     amp_flag: bool,
     amp_dtype,
-) -> Tuple[np.ndarray, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     # Convert to tensor on device
     t_img = (
         torch.from_numpy(np.transpose(img_rgb, (2, 0, 1)))
@@ -76,8 +76,8 @@ def _coarse_forward(
         F.interpolate(prob, size=(H, W), mode="bilinear", align_corners=False)[0, 0]
         .detach()
         .cpu()
-        .numpy()
-    )
+        .float()
+    )  # HxW torch.Tensor on CPU
     return prob_up, cond_map, t_img, y_min_full, y_max_full
 
 
@@ -94,7 +94,7 @@ def _tiled_fine_forward(
     device: torch.device,
     amp_flag: bool,
     amp_dtype,
-) -> np.ndarray:
+) -> torch.Tensor:
     H = int(t_img.shape[2])
     W = int(t_img.shape[3])
     P = patch_size
@@ -153,8 +153,8 @@ def _tiled_fine_forward(
             prob_sum_t[y0:y1, x0:x1] += prob_f_up[bi]
             weight_t[y0:y1, x0:x1] += 1.0
 
-    prob_full = (prob_sum_t / weight_t).detach().cpu().numpy()
-    return prob_full
+    prob_full = (prob_sum_t / weight_t).detach().cpu().float()
+    return prob_full  # HxW torch.Tensor on CPU
 
 
 def _build_model_from_cfg(cfg: dict, device: torch.device) -> WireSegHR:
@@ -216,7 +216,9 @@ def infer_image(
         amp_dtype,
     )
 
-    pred = (prob_f > prob_thresh).astype(np.uint8) * 255
+    # Threshold with torch on CPU; convert to numpy only for saving/returning
+    pred_t = (prob_f > prob_thresh).to(torch.uint8) * 255  # HxW uint8 torch
+    pred = pred_t.detach().cpu().numpy()
 
     if out_dir is not None:
         os.makedirs(out_dir, exist_ok=True)
@@ -225,9 +227,10 @@ def infer_image(
         cv2.imwrite(out_mask, pred)
         if save_prob:
             out_prob = os.path.join(out_dir, f"{stem}_prob.npy")
-            np.save(out_prob, prob_f.astype(np.float32))
+            np.save(out_prob, prob_f.detach().cpu().float().numpy())
 
-    return pred, prob_f
+    # Return numpy arrays for external consumers, computed via torch
+    return pred, prob_f.detach().cpu().numpy()
 
 
 def main():

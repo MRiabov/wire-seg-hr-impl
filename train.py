@@ -635,7 +635,7 @@ def validate(
             amp_dtype,
         )
         # Coarse metrics
-        pred_coarse = (prob_up > prob_thresh).astype(np.uint8)
+        pred_coarse = (prob_up > prob_thresh).to(torch.uint8).cpu().numpy()
         m_c = compute_metrics(pred_coarse, mask)
         for k in coarse_sum:
             coarse_sum[k] += m_c[k]
@@ -664,7 +664,7 @@ def validate(
         if xs[-1] != (W - P):
             xs.append(W - P)
         total_tiles += len(ys) * len(xs)
-        pred_fine = (prob_full > prob_thresh).astype(np.uint8)
+        pred_fine = (prob_full > prob_thresh).to(torch.uint8).cpu().numpy()
         m_f = compute_metrics(pred_fine, mask)
         for k in metrics_sum:
             metrics_sum[k] += m_f[k]
@@ -721,7 +721,7 @@ def save_test_visuals(
             bool(amp_flag),
             None,
         )
-        pred = (prob_up > prob_thresh).astype(np.uint8) * 255
+        pred = ((prob_up > prob_thresh).to(torch.uint8) * 255).cpu().numpy()
         # Save input and prediction
         img_bgr = (img[..., ::-1] * 255.0).astype(np.uint8)
         cv2.imwrite(os.path.join(out_dir, f"{i:03d}_input.jpg"), img_bgr)
