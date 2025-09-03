@@ -15,6 +15,7 @@ import random
 import torch.backends.cudnn as cudnn
 import cv2
 from torch.utils.data import DataLoader
+import time
 
 from src.wireseghr.model import WireSegHR
 from src.wireseghr.model.minmax import MinMaxLuminance
@@ -88,6 +89,11 @@ def main():
     coarse_train = int(cfg["coarse"]["train_size"])  # 512
     patch_size = int(cfg["fine"]["patch_size"])  # 768
     overlap = int(cfg["fine"]["overlap"])  # e.g., 128
+    eval_cfg = cfg.get("eval", {})
+    eval_fine_batch = int(eval_cfg.get("fine_batch", 16))
+    assert eval_fine_batch >= 1
+    eval_max_samples = int(eval_cfg.get("max_samples", 16))
+    assert eval_max_samples >= 1
     iters = int(cfg["optim"]["iters"])  # 40000
     batch_size = int(cfg["optim"]["batch_size"])  # 8
     base_lr = float(cfg["optim"]["lr"])  # 6e-5
@@ -249,6 +255,10 @@ def main():
             del x_fine, logits_coarse, cond_map, logits_fine, y_coarse, y_fine, loss_coarse, loss_fine, loss
             torch.cuda.empty_cache()
             model.eval()
+            print(
+                f"[WireSegHR][train] Eval starting... val_size={len(dset_val)} max={eval_max_samples} patch={patch_size} overlap={overlap} stride={patch_size - overlap} fine_batch={eval_fine_batch}",
+                flush=True,
+            )
             val_stats = validate(
                 model,
                 dset_val,
@@ -261,7 +271,8 @@ def main():
                 mm_kernel,
                 patch_size,
                 overlap,
-                batch_size,
+                eval_fine_batch,
+                eval_max_samples,
             )
             print(
                 f"[Val @ {step}][Fine]   IoU={val_stats['iou']:.4f} F1={val_stats['f1']:.4f} P={val_stats['precision']:.4f} R={val_stats['recall']:.4f}"
@@ -570,13 +581,23 @@ def validate(
     fine_patch_size: int,
     fine_overlap: int,
     fine_batch: int,
+    max_images: int,
 ) -> Dict[str, float]:
     # Coarse-only validation: resize image to coarse_size, predict coarse logits, upsample to full and compute metrics
     model = model.to(device)
     metrics_sum = {"iou": 0.0, "f1": 0.0, "precision": 0.0, "recall": 0.0}
     coarse_sum = {"iou": 0.0, "f1": 0.0, "precision": 0.0, "recall": 0.0}
     n = 0
-    for i in range(len(dset_val)):
+    t0 = time.time()
+    total_tiles = 0
+    target_n = min(len(dset_val), max_images)
+    print(
+        f"[Eval] Started: N={target_n}/{len(dset_val)} coarse={coarse_size} patch={fine_patch_size} overlap={fine_overlap} stride={fine_patch_size - fine_overlap} fine_batch={fine_batch}",
+        flush=True,
+    )
+    for i in range(target_n):
+        if (i % 2) == 0:
+            print(f"[Eval] Running... {i}/{target_n}", flush=True)
         item = dset_val[i]
         img = item["image"].astype(np.float32) / 255.0  # HxWx3
         mask = item["mask"].astype(np.uint8)
@@ -657,10 +678,18 @@ def validate(
         for y0 in ys:
             for x0 in xs:
                 coords.append((y0, x0))
+        total_tiles += len(coords)
 
+        total_batches = (len(coords) + fine_batch - 1) // fine_batch
         for i0 in range(0, len(coords), fine_batch):
             batch_coords = coords[i0 : i0 + fine_batch]
             xs_list: List[torch.Tensor] = []
+            batch_idx = i0 // fine_batch
+            if total_batches > 0 and (batch_idx % max(1, total_batches // 10) == 0):
+                print(
+                    f"[Eval] Image {i+1}/{target_n} tiles {batch_idx}/{total_batches}",
+                    flush=True,
+                )
             for (y0, x0) in batch_coords:
                 y1, x1 = y0 + P, x0 + P
                 # Cond crop mapping (same as training _build_fine_inputs)
@@ -700,15 +729,25 @@ def validate(
         for k in metrics_sum:
             metrics_sum[k] += m_f[k]
         n += 1
-    if n == 0:
-        return {k: 0.0 for k in metrics_sum}
-    out = {k: v / float(n) for k, v in metrics_sum.items()}
+    if n > 0:
+        for k in metrics_sum:
+            metrics_sum[k] /= n
+        for k in coarse_sum:
+            coarse_sum[k] /= n
+    dt = time.time() - t0
+    tp_img = (n / dt) if dt > 0 else 0.0
+    tp_tile = (total_tiles / dt) if dt > 0 else 0.0
+    print(
+        f"[Eval] Done in {dt:.2f}s | imgs={n}, tiles={total_tiles}, imgs/s={tp_img:.2f}, tiles/s={tp_tile:.2f}",
+        flush=True,
+    )
+    out = {k: v for k, v in metrics_sum.items()}
     out.update(
         {
-            "iou_coarse": coarse_sum["iou"] / float(n),
-            "f1_coarse": coarse_sum["f1"] / float(n),
-            "precision_coarse": coarse_sum["precision"] / float(n),
-            "recall_coarse": coarse_sum["recall"] / float(n),
+            "iou_coarse": coarse_sum["iou"],
+            "f1_coarse": coarse_sum["f1"],
+            "precision_coarse": coarse_sum["precision"],
+            "recall_coarse": coarse_sum["recall"],
         }
     )
     return out
