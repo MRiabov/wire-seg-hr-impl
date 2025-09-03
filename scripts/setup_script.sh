@@ -5,9 +5,9 @@ set -euo pipefail
 
 # 0) Setup env (includes gdown used by scripts/pull_ttpla.sh)
 pip install uv
-uv venv || true
-source .venv/bin/activate
-pip install uv
+# uv venv || true # note: don't create new venv since one exists in vast.ai pytorch image.
+# source .venv/bin/activate
+# pip install uv
 uv pip install -r requirements.txt
 uv pip install gdown 
 

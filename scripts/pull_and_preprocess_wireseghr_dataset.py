@@ -80,7 +80,11 @@ def download_folder(folder_id, dest, service_account_json, workers: int):
     for meta in files_with_paths:
         out_path = os.path.join(dest, meta["rel_path"])
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        if meta["size"] > 0 and os.path.exists(out_path) and os.path.getsize(out_path) == meta["size"]:
+        if (
+            meta["size"] > 0
+            and os.path.exists(out_path)
+            and os.path.getsize(out_path) == meta["size"]
+        ):
             skipped += 1
             continue
         tasks.append((meta["id"], out_path))
@@ -98,7 +102,9 @@ def download_folder(folder_id, dest, service_account_json, workers: int):
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = [ex.submit(_download_one, fid, path) for fid, path in tasks]
-        for _ in tqdm(as_completed(futures), total=len(futures), desc="Downloading", unit="file"):
+        for _ in tqdm(
+            as_completed(futures), total=len(futures), desc="Downloading", unit="file"
+        ):
             pass
 
 
@@ -137,7 +143,9 @@ def pull(args=None):
 
 
 def _index_numeric_pairs(images_dir: Path, masks_dir: Path):
-    assert images_dir.exists() and images_dir.is_dir(), f"Missing images_dir: {images_dir}"
+    assert images_dir.exists() and images_dir.is_dir(), (
+        f"Missing images_dir: {images_dir}"
+    )
     assert masks_dir.exists() and masks_dir.is_dir(), f"Missing masks_dir: {masks_dir}"
     img_files = sorted([p for p in images_dir.glob("*.jpg") if p.is_file()])
     img_files += sorted([p for p in images_dir.glob("*.jpeg") if p.is_file()])
@@ -247,7 +255,9 @@ if __name__ == "__main__":
     subs = top.add_subparsers(dest="cmd", required=True)
 
     sp_pull = subs.add_parser("pull", help="Download dataset from Google Drive")
-    sp_pull.add_argument("--folder-id", dest="folder_id", default="1fgy3wn_yuHEeMNbfiHNVl1-jEdYOfu6p")
+    sp_pull.add_argument(
+        "--folder-id", dest="folder_id", default="1fgy3wn_yuHEeMNbfiHNVl1-jEdYOfu6p"
+    )
     sp_pull.add_argument("--output-dir", dest="output_dir", default="dataset/")
     sp_pull.add_argument("--service-account", default="secrets/drive-json.json")
     sp_pull.add_argument("--workers", type=int, default=8)
@@ -265,26 +275,30 @@ if __name__ == "__main__":
 
     ns = top.parse_args()
     if ns.cmd == "pull":
-        pull([
-            "--folder-id",
-            ns.folder_id,
-            "--output-dir",
-            ns.output_dir,
-            "--service-account",
-            ns.service_account,
-            "--workers",
-            str(ns.workers),
-        ])
+        pull(
+            [
+                "--folder-id",
+                ns.folder_id,
+                "--output-dir",
+                ns.output_dir,
+                "--service-account",
+                ns.service_account,
+                "--workers",
+                str(ns.workers),
+            ]
+        )
     elif ns.cmd == "split_test_train_val":
-        split_test_train_val([
-            "--images-dir",
-            ns.images_dir,
-            "--masks-dir",
-            ns.masks_dir,
-            "--out-dir",
-            ns.out_dir,
-            "--seed",
-            str(ns.seed),
-            "--link-method",
-            ns.link_method,
-        ])
+        split_test_train_val(
+            [
+                "--images-dir",
+                ns.images_dir,
+                "--masks-dir",
+                ns.masks_dir,
+                "--out-dir",
+                ns.out_dir,
+                "--seed",
+                str(ns.seed),
+                "--link-method",
+                ns.link_method,
+            ]
+        )

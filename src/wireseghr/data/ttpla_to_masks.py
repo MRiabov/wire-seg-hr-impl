@@ -9,7 +9,9 @@ from PIL import Image, ImageDraw
 import numpy as np
 
 
-def _rasterize_cable_mask(shapes: List[dict], height: int, width: int, label: str) -> np.ndarray:
+def _rasterize_cable_mask(
+    shapes: List[dict], height: int, width: int, label: str
+) -> np.ndarray:
     """Rasterize polygons with given label into a binary mask of shape (H, W), values {0,255}.
 
     Expects LabelMe-style annotations with shape entries containing keys:
@@ -33,7 +35,7 @@ def _rasterize_cable_mask(shapes: List[dict], height: int, width: int, label: st
         pts[:, 0] = np.clip(pts[:, 0], 0, width - 1)
         pts[:, 1] = np.clip(pts[:, 1], 0, height - 1)
         # PIL expects list of (x, y) tuples
-        pts_list = [ (int(p[0]), int(p[1])) for p in pts ]
+        pts_list = [(int(p[0]), int(p[1])) for p in pts]
         draw.polygon(pts_list, outline=255, fill=255)
 
     mask = np.asarray(mask_img, dtype=np.uint8)
@@ -46,12 +48,14 @@ def _convert_one(json_path: Path, out_dir: Path, label: str) -> Path | None:
 
     shapes = data["shapes"]
     H = int(data["imageHeight"])  # required by given JSON
-    W = int(data["imageWidth"])   # required by given JSON
+    W = int(data["imageWidth"])  # required by given JSON
     image_path = Path(data["imagePath"])  # e.g. "1_00186.jpg"
     # WireSegDataset expects numeric filename stems. Derive a numeric-only stem.
     stem_raw = image_path.stem
     out_stem = "".join([c for c in stem_raw if c.isdigit()])
-    assert out_stem.isdigit() and len(out_stem) > 0, f"Non-numeric stem derived from {stem_raw}"
+    assert out_stem.isdigit() and len(out_stem) > 0, (
+        f"Non-numeric stem derived from {stem_raw}"
+    )
 
     mask = _rasterize_cable_mask(shapes, H, W, label)
 
@@ -62,7 +66,12 @@ def _convert_one(json_path: Path, out_dir: Path, label: str) -> Path | None:
     return out_path
 
 
-def convert_ttpla_jsons_to_masks(input_path: str | Path, output_dir: str | Path, label: str = "cable", recursive: bool = True) -> List[Path]:
+def convert_ttpla_jsons_to_masks(
+    input_path: str | Path,
+    output_dir: str | Path,
+    label: str = "cable",
+    recursive: bool = True,
+) -> List[Path]:
     """Convert TTPLA LabelMe JSON annotations into binary masks matching WireSegHR conventions.
 
     - input_path: directory containing JSONs (or a single .json file)
@@ -76,11 +85,15 @@ def convert_ttpla_jsons_to_masks(input_path: str | Path, output_dir: str | Path,
     output_p = Path(output_dir)
 
     if input_p.is_file():
-        assert input_p.suffix.lower() == ".json", f"Expected a .json file, got: {input_p}"
+        assert input_p.suffix.lower() == ".json", (
+            f"Expected a .json file, got: {input_p}"
+        )
         out = _convert_one(input_p, output_p, label)
         return [out] if out else []
 
-    assert input_p.is_dir(), f"Input path must be a directory or a .json file: {input_p}"
+    assert input_p.is_dir(), (
+        f"Input path must be a directory or a .json file: {input_p}"
+    )
 
     json_iter: Iterable[Path]
     if recursive:
@@ -97,11 +110,23 @@ def convert_ttpla_jsons_to_masks(input_path: str | Path, output_dir: str | Path,
 
 
 def main(argv: List[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Convert TTPLA LabelMe JSONs to WireSegHR-style binary masks")
-    parser.add_argument("--input", required=True, help="Path to a directory of JSONs or a single JSON file")
-    parser.add_argument("--output", required=True, help="Output directory for PNG masks")
-    parser.add_argument("--label", default="cable", help="Label to rasterize (default: cable)")
-    parser.add_argument("--no-recursive", action="store_true", help="Do not search subdirectories")
+    parser = argparse.ArgumentParser(
+        description="Convert TTPLA LabelMe JSONs to WireSegHR-style binary masks"
+    )
+    parser.add_argument(
+        "--input",
+        required=True,
+        help="Path to a directory of JSONs or a single JSON file",
+    )
+    parser.add_argument(
+        "--output", required=True, help="Output directory for PNG masks"
+    )
+    parser.add_argument(
+        "--label", default="cable", help="Label to rasterize (default: cable)"
+    )
+    parser.add_argument(
+        "--no-recursive", action="store_true", help="Do not search subdirectories"
+    )
     args = parser.parse_args(argv)
 
     convert_ttpla_jsons_to_masks(

@@ -23,6 +23,7 @@ from src.wireseghr.data.dataset import WireSegDataset
 from src.wireseghr.model.label_downsample import downsample_label_maxpool
 from src.wireseghr.data.sampler import BalancedPatchSampler
 from src.wireseghr.metrics import compute_metrics
+from infer import _coarse_forward, _tiled_fine_forward
 
 
 class SizeBatchSampler:
@@ -40,7 +41,7 @@ class SizeBatchSampler:
         self._len = 0
         for hw, idxs in bins.items():
             _ = hw  # unused, clarity
-            self._len += (len(idxs) // self.batch_size)
+            self._len += len(idxs) // self.batch_size
 
     def __len__(self) -> int:
         return self._len
@@ -54,7 +55,9 @@ class SizeBatchSampler:
             pool = list(bins[hw])
             random.shuffle(pool)
             # Yield only full batches to keep fixed batch size and same-size assumption
-            for i in range(0, len(pool) - (len(pool) % self.batch_size), self.batch_size):
+            for i in range(
+                0, len(pool) - (len(pool) % self.batch_size), self.batch_size
+            ):
                 yield pool[i : i + self.batch_size]
 
 
@@ -87,8 +90,10 @@ def main():
 
     # Config
     coarse_train = int(cfg["coarse"]["train_size"])  # 512
-    patch_size = int(cfg["fine"]["patch_size"])  # 768
+    coarse_test = int(cfg["coarse"]["test_size"])  # use higher res for eval/infer
+    patch_size = int(cfg["fine"]["patch_size"])  # training fine patch size
     overlap = int(cfg["fine"]["overlap"])  # e.g., 128
+    eval_patch_size = int(cfg["inference"]["fine_patch_size"])  # 1024 for eval/infer
     eval_cfg = cfg.get("eval", {})
     eval_fine_batch = int(eval_cfg.get("fine_batch", 16))
     assert eval_fine_batch >= 1
@@ -107,15 +112,17 @@ def main():
     if amp_enabled:
         cc_major, cc_minor = torch.cuda.get_device_capability()
         if precision == "fp16":
-            assert (
-                cc_major >= 7
-            ), f"fp16 requires Volta (SM 7.0)+; current SM {cc_major}.{cc_minor}"
+            assert cc_major >= 7, (
+                f"fp16 requires Volta (SM 7.0)+; current SM {cc_major}.{cc_minor}"
+            )
         elif precision == "bf16":
-            assert (
-                cc_major >= 8
-            ), f"bf16 requires Ampere (SM 8.0)+; current SM {cc_major}.{cc_minor}"
+            assert cc_major >= 8, (
+                f"bf16 requires Ampere (SM 8.0)+; current SM {cc_major}.{cc_minor}"
+            )
     amp_dtype = (
-        torch.float16 if precision == "fp16" else (torch.bfloat16 if precision == "bf16" else None)
+        torch.float16
+        if precision == "fp16"
+        else (torch.bfloat16 if precision == "bf16" else None)
     )
 
     # Housekeeping
@@ -135,7 +142,9 @@ def main():
     num_workers = int(loader_cfg.get("num_workers", 4))
     prefetch_factor = int(loader_cfg.get("prefetch_factor", 2))
     pin_memory = bool(loader_cfg.get("pin_memory", True))
-    persistent_workers = bool(loader_cfg.get("persistent_workers", True)) if num_workers > 0 else False
+    persistent_workers = (
+        bool(loader_cfg.get("persistent_workers", True)) if num_workers > 0 else False
+    )
     batch_sampler = SizeBatchSampler(dset, batch_size)
     loader_kwargs = dict(
         batch_sampler=batch_sampler,
@@ -252,24 +261,34 @@ def main():
         # Eval & Checkpoint
         if (step % eval_interval == 0) and (dset_val is not None):
             # Free training-step tensors before eval to lower peak memory
-            del x_fine, logits_coarse, cond_map, logits_fine, y_coarse, y_fine, loss_coarse, loss_fine, loss
+            del (
+                x_fine,
+                logits_coarse,
+                cond_map,
+                logits_fine,
+                y_coarse,
+                y_fine,
+                loss_coarse,
+                loss_fine,
+                loss,
+            )
             torch.cuda.empty_cache()
             model.eval()
             print(
-                f"[WireSegHR][train] Eval starting... val_size={len(dset_val)} max={eval_max_samples} patch={patch_size} overlap={overlap} stride={patch_size - overlap} fine_batch={eval_fine_batch}",
+                f"[WireSegHR][train] Eval starting... val_size={len(dset_val)} max={eval_max_samples} patch={eval_patch_size} overlap={overlap} stride={eval_patch_size - overlap} fine_batch={eval_fine_batch}",
                 flush=True,
             )
             val_stats = validate(
                 model,
                 dset_val,
-                coarse_train,
+                coarse_test,
                 device,
                 amp_enabled,
                 amp_dtype,
                 prob_thresh,
                 mm_enable,
                 mm_kernel,
-                patch_size,
+                eval_patch_size,
                 overlap,
                 eval_fine_batch,
                 eval_max_samples,
@@ -306,7 +325,7 @@ def main():
                 save_test_visuals(
                     model,
                     dset_test,
-                    coarse_train,
+                    coarse_test,
                     device,
                     os.path.join(out_dir, f"test_vis_{step}"),
                     amp_enabled,
@@ -604,52 +623,16 @@ def validate(
         img = item["image"].astype(np.float32) / 255.0  # HxWx3
         mask = item["mask"].astype(np.uint8)
         H, W = mask.shape
-        # Build coarse input (zeros for cond+loc) on GPU
-        t_img = (
-            torch.from_numpy(np.transpose(img, (2, 0, 1)))
-            .unsqueeze(0)
-            .to(device)
-            .float()
-        )
-        rgb_c = F.interpolate(
-            t_img, size=(coarse_size, coarse_size), mode="bilinear", align_corners=False
-        )[0]
-        y_t = 0.299 * t_img[:, 0:1] + 0.587 * t_img[:, 1:2] + 0.114 * t_img[:, 2:3]
-        if minmax_enable:
-            # Asymmetric padding for even kernel to keep same HxW
-            k = int(minmax_kernel)
-            if (k % 2) == 0:
-                pad = (k // 2 - 1, k // 2, k // 2 - 1, k // 2)
-            else:
-                pad = (k // 2, k // 2, k // 2, k // 2)
-            y_p = F.pad(y_t, pad, mode="replicate")
-            y_max_full = F.max_pool2d(y_p, kernel_size=k, stride=1)
-            y_min_full = -F.max_pool2d(-y_p, kernel_size=k, stride=1)
-        else:
-            y_min_full = y_t
-            y_max_full = y_t
-        y_min_c = F.interpolate(
-            y_min_full,
-            size=(coarse_size, coarse_size),
-            mode="bilinear",
-            align_corners=False,
-        )[0]
-        y_max_c = F.interpolate(
-            y_max_full,
-            size=(coarse_size, coarse_size),
-            mode="bilinear",
-            align_corners=False,
-        )[0]
-        zeros_c = torch.zeros(1, coarse_size, coarse_size, device=device)
-        x_t = torch.cat([rgb_c, y_min_c, y_max_c, zeros_c], dim=0).unsqueeze(0)
-        with autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_flag):
-            logits_c, cond_map = model.forward_coarse(x_t)
-        prob = torch.softmax(logits_c, dim=1)[:, 1:2]
-        prob_up = (
-            F.interpolate(prob, size=(H, W), mode="bilinear", align_corners=False)[0, 0]
-            .detach()
-            .cpu()
-            .numpy()
+        # Reuse inference coarse pass
+        prob_up, cond_map, t_img, y_min_full, y_max_full = _coarse_forward(
+            model,
+            img,
+            coarse_size,
+            minmax_enable,
+            int(minmax_kernel),
+            device,
+            amp_flag,
+            amp_dtype,
         )
         # Coarse metrics
         pred_coarse = (prob_up > prob_thresh).astype(np.uint8)
@@ -657,75 +640,30 @@ def validate(
         for k in coarse_sum:
             coarse_sum[k] += m_c[k]
 
-        # Fine-stage tiled inference and stitching (BATCHED)
-        P = fine_patch_size
-        stride = P - fine_overlap
-        assert stride > 0
-        assert H >= P and W >= P
-        # Accumulate on device to avoid CPU<->GPU thrash
-        prob_sum_t = torch.zeros((H, W), device=device, dtype=torch.float32)
-        weight_t = torch.zeros((H, W), device=device, dtype=torch.float32)
-
-        # Prepare min/max on full-res (already computed above as y_min_full/y_max_full)
-        hc4, wc4 = cond_map.shape[2], cond_map.shape[3]
-
-        ys = list(range(0, max(H - P, 0) + 1, stride))
+        # Fine-stage via helper (batched and stitched)
+        prob_full = _tiled_fine_forward(
+            model,
+            t_img,
+            cond_map,
+            y_min_full,
+            y_max_full,
+            int(fine_patch_size),
+            int(fine_overlap),
+            int(fine_batch),
+            device,
+            amp_flag,
+            amp_dtype,
+        )
+        # Track tiles for throughput parity
+        P = int(fine_patch_size)
+        stride = P - int(fine_overlap)
+        ys = list(range(0, H - P + 1, stride))
         if ys[-1] != (H - P):
             ys.append(H - P)
-        xs = list(range(0, max(W - P, 0) + 1, stride))
+        xs = list(range(0, W - P + 1, stride))
         if xs[-1] != (W - P):
             xs.append(W - P)
-
-        coords: List[Tuple[int, int]] = []
-        for y0 in ys:
-            for x0 in xs:
-                coords.append((y0, x0))
-        total_tiles += len(coords)
-
-        total_batches = (len(coords) + fine_batch - 1) // fine_batch
-        for i0 in range(0, len(coords), fine_batch):
-            batch_coords = coords[i0 : i0 + fine_batch]
-            xs_list: List[torch.Tensor] = []
-            batch_idx = i0 // fine_batch
-            if total_batches > 0 and (batch_idx % max(1, total_batches // 10) == 0):
-                print(
-                    f"[Eval] Img {i+1}/{target_n} | Tile batch {batch_idx+1}/{total_batches}",
-                    flush=True,
-                )
-            for (y0, x0) in batch_coords:
-                y1, x1 = y0 + P, x0 + P
-                # Cond crop mapping (same as training _build_fine_inputs)
-                y0c = (y0 * hc4) // H
-                y1c = ((y1 * hc4) + H - 1) // H
-                x0c = (x0 * wc4) // W
-                x1c = ((x1 * wc4) + W - 1) // W
-                cond_sub = cond_map[:, :, y0c:y1c, x0c:x1c].float()
-                cond_patch = F.interpolate(
-                    cond_sub, size=(P, P), mode="bilinear", align_corners=False
-                ).squeeze(1)  # 1xPxP
-
-                # Build fine input channels directly from on-device tensors
-                rgb_t = t_img[0, :, y0:y1, x0:x1]  # 3xPxP
-                ymin_t = y_min_full[0, 0, y0:y1, x0:x1].float().unsqueeze(0)  # 1xPxP
-                ymax_t = y_max_full[0, 0, y0:y1, x0:x1].float().unsqueeze(0)  # 1xPxP
-                x_f = torch.cat([rgb_t, ymin_t, ymax_t, cond_patch], dim=0).unsqueeze(0)
-                xs_list.append(x_f)
-
-            x_f_batch = torch.cat(xs_list, dim=0)  # Bx6xPxP
-
-            with autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_flag):
-                logits_f = model.forward_fine(x_f_batch)
-                prob_f = torch.softmax(logits_f, dim=1)[:, 1:2]
-                prob_f_up = F.interpolate(
-                    prob_f, size=(P, P), mode="bilinear", align_corners=False
-                )[:, 0, :, :]  # BxPxP
-
-            for bi, (y0, x0) in enumerate(batch_coords):
-                y1, x1 = y0 + P, x0 + P
-                prob_sum_t[y0:y1, x0:x1] += prob_f_up[bi]
-                weight_t[y0:y1, x0:x1] += 1.0
-
-        prob_full = (prob_sum_t / weight_t).detach().cpu().numpy()
+        total_tiles += len(ys) * len(xs)
         pred_fine = (prob_full > prob_thresh).astype(np.uint8)
         m_f = compute_metrics(pred_fine, mask)
         for k in metrics_sum:
@@ -773,50 +711,15 @@ def save_test_visuals(
         item = dset_test[i]
         img = item["image"].astype(np.float32) / 255.0
         H, W = img.shape[:2]
-        t_img = (
-            torch.from_numpy(np.transpose(img, (2, 0, 1)))
-            .unsqueeze(0)
-            .to(device)
-            .float()
-        )
-        rgb_c = F.interpolate(
-            t_img, size=(coarse_size, coarse_size), mode="bilinear", align_corners=False
-        )[0]
-        y_t = 0.299 * t_img[:, 0:1] + 0.587 * t_img[:, 1:2] + 0.114 * t_img[:, 2:3]
-        if minmax_enable:
-            k = int(minmax_kernel)
-            if (k % 2) == 0:
-                pad = (k // 2 - 1, k // 2, k // 2 - 1, k // 2)
-            else:
-                pad = (k // 2, k // 2, k // 2, k // 2)
-            y_p = F.pad(y_t, pad, mode="replicate")
-            y_max_full = F.max_pool2d(y_p, kernel_size=k, stride=1)
-            y_min_full = -F.max_pool2d(-y_p, kernel_size=k, stride=1)
-        else:
-            y_min_full = y_t
-            y_max_full = y_t
-        y_min_c = F.interpolate(
-            y_min_full,
-            size=(coarse_size, coarse_size),
-            mode="bilinear",
-            align_corners=False,
-        )[0]
-        y_max_c = F.interpolate(
-            y_max_full,
-            size=(coarse_size, coarse_size),
-            mode="bilinear",
-            align_corners=False,
-        )[0]
-        zeros_c = torch.zeros(1, coarse_size, coarse_size, device=device)
-        x_t = torch.cat([rgb_c, y_min_c, y_max_c, zeros_c], dim=0).unsqueeze(0)
-        with autocast(device_type=device.type, dtype=None, enabled=amp_flag):
-            logits_c, _ = model.forward_coarse(x_t)
-        prob = torch.softmax(logits_c, dim=1)[:, 1:2]
-        prob_up = (
-            F.interpolate(prob, size=(H, W), mode="bilinear", align_corners=False)[0, 0]
-            .detach()
-            .cpu()
-            .numpy()
+        prob_up, _cond_map, _t_img, _ymin, _ymax = _coarse_forward(
+            model,
+            img,
+            int(coarse_size),
+            bool(minmax_enable),
+            int(minmax_kernel),
+            device,
+            bool(amp_flag),
+            None,
         )
         pred = (prob_up > prob_thresh).astype(np.uint8) * 255
         # Save input and prediction

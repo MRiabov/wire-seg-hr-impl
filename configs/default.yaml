@@ -7,7 +7,7 @@ coarse:
   test_size: 1024
 
 fine:
-  patch_size: 768
+  patch_size: 512
   overlap: 128
 
 conditioning:
@@ -23,12 +23,13 @@ label:
 
 inference:
   alpha: 0.01
-  prob_threshold: 0.3 # was 0.5, not actually mentioned in the paper.
+  prob_threshold: 0.5  # default inference threshold per paper tuning
+  fine_patch_size: 1024
   stitch: avg_logits
 
 eval:
   max_samples: 16
-  fine_batch: 48
+  fine_batch: 32
 
 optim:
   iters: 2000
@@ -44,7 +45,7 @@ seed: 42
 out_dir: runs/wireseghr
 eval_interval: 100
 ckpt_interval: 300
-resume: runs/wireseghr/ckpt_300.pt  # optional
+resume: runs/wireseghr/ckpt_1800.pt  # optional
 
 # dataset paths (placeholders)
 data:
