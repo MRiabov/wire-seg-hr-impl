@@ -9,12 +9,16 @@ from wireseghr.data.ttpla_to_masks import convert_ttpla_jsons_to_masks
 def _read_dims(json_path: Path):
     with open(json_path, "r") as f:
         data = json.load(f)
-    return int(data["imageHeight"]), int(data["imageWidth"]), Path(data["imagePath"]).stem
+    return (
+        int(data["imageHeight"]),
+        int(data["imageWidth"]),
+        Path(data["imagePath"]).stem,
+    )
 
 
 def test_convert_single_json_cable_only(tmp_path: Path):
     # Use the provided example JSON at repo root
-    src_json = Path("/workspace/wire-seg-hr-impl/1_00186.json")
+    src_json = Path("/workspace/wire-seg-hr-impl/tests/1_00186_from_ttpla_dataset.json")
     assert src_json.exists()
 
     H, W, stem = _read_dims(src_json)
@@ -41,14 +45,16 @@ def test_convert_single_json_cable_only(tmp_path: Path):
 
 
 def test_convert_different_labels(tmp_path: Path):
-    src_json = Path("/workspace/wire-seg-hr-impl/1_00186.json")
+    src_json = Path("/workspace/wire-seg-hr-impl/tests/1_00186_from_ttpla_dataset.json")
     assert src_json.exists()
 
     out_dir_cable = tmp_path / "masks_cable"
     out_dir_tower = tmp_path / "masks_tower"
 
     written_cable = convert_ttpla_jsons_to_masks(src_json, out_dir_cable, label="cable")
-    written_tower = convert_ttpla_jsons_to_masks(src_json, out_dir_tower, label="tower_wooden")
+    written_tower = convert_ttpla_jsons_to_masks(
+        src_json, out_dir_tower, label="tower_wooden"
+    )
 
     mc = np.array(Image.open(written_cable[0]).convert("L"))
     mt = np.array(Image.open(written_tower[0]).convert("L"))
