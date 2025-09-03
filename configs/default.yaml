@@ -1,5 +1,5 @@
 # Default configuration for WireSegHR (segmentation-only)
-backbone: mit_b3
+backbone: mit_b2
 pretrained: true  # Uses HF SegFormer weights if available; else timm or tiny fallback
 
 coarse:
@@ -24,7 +24,7 @@ label:
 
 inference:
   alpha: 0.01
-  prob_threshold: 0.5
+  prob_threshold: 0.3 # was 0.5, not actually mentioned in the paper.
   stitch: avg_logits
 
 optim:

@@ -20,7 +20,7 @@ class WireSegHR(nn.Module):
     """
 
     def __init__(
-        self, backbone: str = "mit_b3", in_channels: int = 7, pretrained: bool = True
+        self, backbone: str = "mit_b2", in_channels: int = 7, pretrained: bool = True
     ):
         super().__init__()
         self.encoder = SegFormerEncoder(

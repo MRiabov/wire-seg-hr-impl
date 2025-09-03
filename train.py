@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.cuda.amp import autocast
+from torch.amp import autocast
 from torch.amp import GradScaler
 from tqdm import tqdm
 import random
@@ -46,6 +46,7 @@ def main():
     # Config
     coarse_train = int(cfg["coarse"]["train_size"])  # 512
     patch_size = int(cfg["fine"]["patch_size"])  # 768
+    overlap = int(cfg["fine"]["overlap"])  # e.g., 128
     iters = int(cfg["optim"]["iters"])  # 40000
     batch_size = int(cfg["optim"]["batch_size"])  # 8
     base_lr = float(cfg["optim"]["lr"])  # 6e-5
@@ -126,7 +127,9 @@ def main():
             imgs, masks, coarse_train, patch_size, sampler, minmax, device
         )
 
-        with autocast(enabled=(device.type == "cuda" and amp_flag)):
+        with autocast(
+            device_type=device.type, enabled=(device.type == "cuda" and amp_flag)
+        ):
             logits_coarse, cond_map = model.forward_coarse(
                 batch["x_coarse"]
             )  # (B,2,Hc/4,Wc/4) and (B,1,Hc/4,Wc/4)
@@ -134,7 +137,9 @@ def main():
         # Build fine inputs: crop cond from low-res map to patch, concat with patch RGB+MinMax and loc mask
         B, _, hc4, wc4 = cond_map.shape
         x_fine = _build_fine_inputs(batch, cond_map, device)
-        with autocast(enabled=(device.type == "cuda" and amp_flag)):
+        with autocast(
+            device_type=device.type, enabled=(device.type == "cuda" and amp_flag)
+        ):
             logits_fine = model.forward_fine(x_fine)
 
             # Targets
@@ -174,9 +179,14 @@ def main():
                 prob_thresh,
                 mm_enable,
                 mm_kernel,
+                patch_size,
+                overlap,
             )
             print(
-                f"[Val @ {step}] IoU={val_stats['iou']:.4f} F1={val_stats['f1']:.4f} P={val_stats['precision']:.4f} R={val_stats['recall']:.4f}"
+                f"[Val @ {step}][Fine]   IoU={val_stats['iou']:.4f} F1={val_stats['f1']:.4f} P={val_stats['precision']:.4f} R={val_stats['recall']:.4f}"
+            )
+            print(
+                f"[Val @ {step}][Coarse] IoU={val_stats['iou_coarse']:.4f} F1={val_stats['f1_coarse']:.4f} P={val_stats['precision_coarse']:.4f} R={val_stats['recall_coarse']:.4f}"
             )
             # Save best
             if val_stats["f1"] > best_f1:
@@ -481,10 +491,13 @@ def validate(
     prob_thresh: float,
     minmax_enable: bool,
     minmax_kernel: int,
+    fine_patch_size: int,
+    fine_overlap: int,
 ) -> Dict[str, float]:
     # Coarse-only validation: resize image to coarse_size, predict coarse logits, upsample to full and compute metrics
     model = model.to(device)
     metrics_sum = {"iou": 0.0, "f1": 0.0, "precision": 0.0, "recall": 0.0}
+    coarse_sum = {"iou": 0.0, "f1": 0.0, "precision": 0.0, "recall": 0.0}
     n = 0
     for i in range(len(dset_val)):
         item = dset_val[i]
@@ -529,8 +542,10 @@ def validate(
         )[0]
         zeros_c = torch.zeros(1, coarse_size, coarse_size, device=device)
         x_t = torch.cat([rgb_c, y_min_c, y_max_c, zeros_c, zeros_c], dim=0).unsqueeze(0)
-        with autocast(enabled=(device.type == "cuda" and amp_flag)):
-            logits_c, _ = model.forward_coarse(x_t)
+        with autocast(
+            device_type=device.type, enabled=(device.type == "cuda" and amp_flag)
+        ):
+            logits_c, cond_map = model.forward_coarse(x_t)
         prob = torch.softmax(logits_c, dim=1)[:, 1:2]
         prob_up = (
             F.interpolate(prob, size=(H, W), mode="bilinear", align_corners=False)[0, 0]
@@ -538,14 +553,98 @@ def validate(
             .cpu()
             .numpy()
         )
-        pred = (prob_up > prob_thresh).astype(np.uint8)
-        m = compute_metrics(pred, mask)
+        # Coarse metrics
+        pred_coarse = (prob_up > prob_thresh).astype(np.uint8)
+        m_c = compute_metrics(pred_coarse, mask)
+        for k in coarse_sum:
+            coarse_sum[k] += m_c[k]
+
+        # Fine-stage tiled inference and stitching
+        P = fine_patch_size
+        stride = P - fine_overlap
+        assert stride > 0
+        assert H >= P and W >= P
+        prob_sum = np.zeros((H, W), dtype=np.float32)
+        weight = np.zeros((H, W), dtype=np.float32)
+
+        # Prepare min/max on full-res (already computed above as y_min_full/y_max_full)
+        # y_min_full, y_max_full exist in this scope from above branch
+        hc4, wc4 = cond_map.shape[2], cond_map.shape[3]
+
+        ys = list(range(0, max(H - P, 0) + 1, stride))
+        if ys[-1] != (H - P):
+            ys.append(H - P)
+        xs = list(range(0, max(W - P, 0) + 1, stride))
+        if xs[-1] != (W - P):
+            xs.append(W - P)
+
+        for y0 in ys:
+            for x0 in xs:
+                y1, x1 = y0 + P, x0 + P
+                # Build fine input 1x7xP x P
+                patch_rgb = img[y0:y1, x0:x1, :]
+                ymin_patch = y_min_full[0, 0, y0:y1, x0:x1].detach().cpu().numpy()
+                ymax_patch = y_max_full[0, 0, y0:y1, x0:x1].detach().cpu().numpy()
+                loc = np.ones((P, P), dtype=np.float32)
+
+                # Cond crop mapping (same as training _build_fine_inputs)
+                y0c = (y0 * hc4) // H
+                y1c = ((y1 * hc4) + H - 1) // H
+                x0c = (x0 * wc4) // W
+                x1c = ((x1 * wc4) + W - 1) // W
+                cond_sub = cond_map[:, :, y0c:y1c, x0c:x1c].float()
+                cond_patch = F.interpolate(
+                    cond_sub, size=(P, P), mode="bilinear", align_corners=False
+                ).squeeze(1)  # 1xPxP
+
+                rgb_t = (
+                    torch.from_numpy(np.transpose(patch_rgb, (2, 0, 1)))
+                    .to(device)
+                    .float()
+                )  # 3xPxP
+                ymin_t = torch.from_numpy(ymin_patch)[None, ...].to(device).float()
+                ymax_t = torch.from_numpy(ymax_patch)[None, ...].to(device).float()
+                loc_t = torch.from_numpy(loc)[None, ...].to(device).float()
+                x_f = torch.cat(
+                    [rgb_t, ymin_t, ymax_t, cond_patch, loc_t], dim=0
+                ).unsqueeze(0)
+
+                with autocast(
+                    device_type=device.type,
+                    enabled=(device.type == "cuda" and amp_flag),
+                ):
+                    logits_f = model.forward_fine(x_f)
+                    prob_f = torch.softmax(logits_f, dim=1)[:, 1:2]
+                    prob_f_up = (
+                        F.interpolate(
+                            prob_f, size=(P, P), mode="bilinear", align_corners=False
+                        )[0, 0]
+                        .detach()
+                        .cpu()
+                        .numpy()
+                    )
+
+                prob_sum[y0:y1, x0:x1] += prob_f_up
+                weight[y0:y1, x0:x1] += 1.0
+
+        prob_full = prob_sum / weight
+        pred_fine = (prob_full > prob_thresh).astype(np.uint8)
+        m_f = compute_metrics(pred_fine, mask)
         for k in metrics_sum:
-            metrics_sum[k] += m[k]
+            metrics_sum[k] += m_f[k]
         n += 1
     if n == 0:
         return {k: 0.0 for k in metrics_sum}
-    return {k: v / float(n) for k, v in metrics_sum.items()}
+    out = {k: v / float(n) for k, v in metrics_sum.items()}
+    out.update(
+        {
+            "iou_coarse": coarse_sum["iou"] / float(n),
+            "f1_coarse": coarse_sum["f1"] / float(n),
+            "precision_coarse": coarse_sum["precision"] / float(n),
+            "recall_coarse": coarse_sum["recall"] / float(n),
+        }
+    )
+    return out
 
 
 @torch.no_grad()
@@ -602,7 +701,9 @@ def save_test_visuals(
         )[0]
         zeros_c = torch.zeros(1, coarse_size, coarse_size, device=device)
         x_t = torch.cat([rgb_c, y_min_c, y_max_c, zeros_c, zeros_c], dim=0).unsqueeze(0)
-        with autocast(enabled=(device.type == "cuda" and amp_flag)):
+        with autocast(
+            device_type=device.type, enabled=(device.type == "cuda" and amp_flag)
+        ):
             logits_c, _ = model.forward_coarse(x_t)
         prob = torch.softmax(logits_c, dim=1)[:, 1:2]
         prob_up = (

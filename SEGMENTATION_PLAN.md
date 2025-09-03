@@ -21,7 +21,7 @@ Focus: segmentation only (no dataset collection or inpainting).
 
 ## Project Structure
 - `configs/`
-  - `default.yaml` (backbone=mit_b3, p=768, coarse_train=512, coarse_test=1024, alpha=0.01, minmax=true, kernel=6, maxpool_label=true, cond_variant=global+binary_mask)
+  - `default.yaml` (backbone=mit_b2, p=768, coarse_train=512, coarse_test=1024, alpha=0.01, minmax=true, kernel=6, maxpool_label=true, cond_variant=global+binary_mask)
 - `src/wireseghr/`
   - `model/`
     - `encoder.py` (SegFormer MiT-B3, N_in channels expansion)
@@ -106,7 +106,7 @@ Focus: segmentation only (no dataset collection or inpainting).
 - Ablations: MinMax on/off, MaxPool on/off, conditioning variant (Table `tables/logit.tex`).
 
 ## Configuration Surface (key)
-- Backbone/weights: `mit_b3` (pretrained ImageNet-1K).
+- Backbone/weights: `mit_b2` (pretrained ImageNet-1K).
 - Sizes: `p=768`, `coarse_train=512`, `coarse_test=1024`, `overlap=128`.
 - Conditioning: `use_binary_location=true`, `cond_from='coarse_logits_1x1'`, `cond_crop='patch'`.
 - MinMax: `enable=true`, `kernel=6`.

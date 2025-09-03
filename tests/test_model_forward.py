@@ -5,7 +5,7 @@ from wireseghr.model import WireSegHR
 
 def test_wireseghr_forward_shapes():
     # Use small input to keep test light and avoid downloading weights
-    model = WireSegHR(backbone="mit_b3", in_channels=3, pretrained=False)
+    model = WireSegHR(backbone="mit_b2", in_channels=3, pretrained=False)
 
     x = torch.randn(1, 3, 64, 64)
     logits_coarse, cond = model.forward_coarse(x)
