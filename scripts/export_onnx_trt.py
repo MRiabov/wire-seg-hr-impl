@@ -1,9 +1,12 @@
 import argparse
 import os
 import pprint
+import shutil
+import subprocess
 from typing import Tuple
 
 import torch
+import tensorrt as trt
 
 from src.wireseghr.model import WireSegHR
 
@@ -44,6 +47,7 @@ def main():
     parser.add_argument("--fine_patch_size", type=int, default=1024)
     parser.add_argument("--opset", type=int, default=17)
     parser.add_argument("--trtexec", type=str, default="", help="Optional path to trtexec to build TRT engines")
+    parser.add_argument("--build_trt", action="store_true", help="Build TensorRT engines after ONNX export")
 
     args = parser.parse_args()
 
@@ -85,6 +89,7 @@ def main():
         input_names=["x_coarse"],
         output_names=["logits", "cond"],
         dynamic_axes=None,
+        dynamo=True
     )
 
     # Fine export
@@ -103,25 +108,56 @@ def main():
         dynamic_axes=None,
     )
 
-    # Optional TensorRT building via trtexec
-    if args.trtexec:
-        import subprocess
-
-        def build_engine(onnx_path: str, engine_path: str):
-            print(f"[export] Building TRT engine: {engine_path}")
-            cmd = [
-                args.trtexec,
-                f"--onnx={onnx_path}",
-                f"--saveEngine={engine_path}",
-                "--explicitBatch",
-                "--fp16",
-            ]
-            subprocess.run(cmd, check=True)
-
+    # Optional TensorRT building via trtexec; fallback to Python API if unavailable
+    if args.build_trt:
+        trtexec_path = args.trtexec if args.trtexec else shutil.which("trtexec")
         coarse_engine = os.path.join(args.out_dir, f"wireseghr_coarse_{args.coarse_size}.engine")
         fine_engine = os.path.join(args.out_dir, f"wireseghr_fine_{args.fine_patch_size}.engine")
-        build_engine(coarse_onnx, coarse_engine)
-        build_engine(fine_onnx, fine_engine)
+        if trtexec_path:
+            def build_engine_cli(onnx_path: str, engine_path: str):
+                print(f"[export] Building TRT engine (trtexec): {engine_path}")
+                cmd = [
+                    trtexec_path,
+                    f"--onnx={onnx_path}",
+                    f"--saveEngine={engine_path}",
+                    "--explicitBatch",
+                    "--fp16",
+                ]
+                subprocess.run(cmd, check=True)
+
+            build_engine_cli(coarse_onnx, coarse_engine)
+            build_engine_cli(fine_onnx, fine_engine)
+        else:
+            print("[export] trtexec not found; building engines via TensorRT Python API")
+
+            def build_engine_py(onnx_path: str, engine_path: str):
+                logger = trt.Logger(trt.Logger.WARNING)
+                builder = trt.Builder(logger)
+                network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+                parser = trt.OnnxParser(network, logger)
+                with open(onnx_path, "rb") as f:
+                    data = f.read()
+                ok = parser.parse(data)
+                if not ok:
+                    for i in range(parser.num_errors):
+                        print(f"[TRT][parser] {parser.get_error(i)}")
+                    raise RuntimeError("ONNX parse failed")
+
+                config = builder.create_builder_config()
+                config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 30)
+                if builder.platform_has_fast_fp16:
+                    config.set_flag(trt.BuilderFlag.FP16)
+
+                print(f"[export] Building TRT engine (Python): {engine_path}")
+                serialized = builder.build_serialized_network(network, config)
+                assert serialized is not None, "Failed to build TensorRT engine"
+                with open(engine_path, "wb") as f:
+                    f.write(serialized)
+
+            build_engine_py(coarse_onnx, coarse_engine)
+            build_engine_py(fine_onnx, fine_engine)
+    else:
+        print("[export] Skipping TensorRT engine build (use --build_trt to enable)")
 
     print("[export] Done.")
 
