@@ -94,10 +94,10 @@ def main():
     mm_kernel = int(cfg["minmax"]["kernel"])
 
     # Model
-    # Channel definition: RGB(3) + MinMax(2) + cond(1) + loc(1) = 7
+    # Channel definition: RGB(3) + MinMax(2) + cond(1) = 6
     pretrained_flag = bool(cfg.get("pretrained", False))
     model = WireSegHR(
-        backbone=cfg["backbone"], in_channels=7, pretrained=pretrained_flag
+        backbone=cfg["backbone"], in_channels=6, pretrained=pretrained_flag
     )
     model = model.to(device)
 
@@ -280,7 +280,6 @@ def _prepare_batch(
     patches_mask = []
     patches_min = []
     patches_max = []
-    loc_masks = []
     yx_list: List[tuple[int, int]] = []
 
     for img, mask in zip(imgs, masks):
@@ -303,7 +302,7 @@ def _prepare_batch(
             y_min_full = y_t
             y_max_full = y_t
 
-        # Coarse input: resize on GPU, build 7-ch tensor
+        # Coarse input: resize on GPU, build 6-ch tensor (RGB + min + max + cond0)
         rgb_coarse_t = F.interpolate(
             t_img,
             size=(coarse_train, coarse_train),
@@ -541,7 +540,7 @@ def validate(
             align_corners=False,
         )[0]
         zeros_c = torch.zeros(1, coarse_size, coarse_size, device=device)
-        x_t = torch.cat([rgb_c, y_min_c, y_max_c, zeros_c, zeros_c], dim=0).unsqueeze(0)
+        x_t = torch.cat([rgb_c, y_min_c, y_max_c, zeros_c], dim=0).unsqueeze(0)
         with autocast(
             device_type=device.type, enabled=(device.type == "cuda" and amp_flag)
         ):

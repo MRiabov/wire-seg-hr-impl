@@ -15,7 +15,7 @@ class SegFormerEncoder(nn.Module):
     def __init__(
         self,
         backbone: str = "mit_b2",
-        in_channels: int = 7,
+        in_channels: int = 6,
         pretrained: bool = True,
         out_indices: Tuple[int, int, int, int] = (0, 1, 2, 3),
     ):
@@ -125,11 +125,11 @@ class _HFEncoderWrapper(nn.Module):
             "mit_b0": "nvidia/mit-b0",
             "mit_b1": "nvidia/mit-b1",
             "mit_b2": "nvidia/mit-b2",
-            "mit_b2": "nvidia/mit-b3",
+            "mit_b3": "nvidia/mit-b3",
             "mit_b4": "nvidia/mit-b4",
             "mit_b5": "nvidia/mit-b5",
         }
-        model_id = name_map.get(backbone, "nvidia/mit-b0")
+        model_id = name_map[backbone]
 
         if pretrained:
             base_cfg = SegformerConfig.from_pretrained(model_id)
