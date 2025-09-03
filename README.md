@@ -32,7 +32,7 @@ python src/wireseghr/infer.py --config configs/default.yaml --image /path/to/ima
 
 ### Backbone Source
 - HuggingFace Transformers SegFormer (e.g., `nvidia/mit-b3`). We set `num_channels` to match input channels.
-- Fallback: a small internal CNN that preserves 1/4, 1/8, 1/16, 1/32 strides with channels [64, 128, 320, 512].
+- Alternative: TorchVision ResNet-50 (`backbone: resnet50`). The stem is adapted to the requested `in_channels`, and we expose features from `layer1`..`layer4` at strides 1/4, 1/8, 1/16, 1/32 with channels [256, 512, 1024, 2048].
 
 ## Dataset Convention
 - Flat directories with numeric filenames; images are `.jpg`/`.jpeg`, masks are `.png`.

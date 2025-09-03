@@ -1,14 +1,18 @@
-"""SegFormer MiT encoder wrapper with adjustable input channels.
+"""Encoder wrappers with adjustable input channels.
 
-Uses HuggingFace Transformers SegFormer (e.g., mit_b2) and returns a list of
-multi-scale features [C1, C2, C3, C4]. Falls back to a tiny CNN if HF isn't
-available.
+Supports two backbone families:
+- HuggingFace Transformers SegFormer (e.g., "mit_b2")
+- TorchVision ResNet-50 (use backbone "resnet50" | "resnet-50" | "resnet_50")
+
+Both return a list of 4 multi-scale feature maps [C1, C2, C3, C4] at strides
+1/4, 1/8, 1/16, 1/32 respectively.
 """
 
 from typing import List, Tuple
 
 import torch
 import torch.nn as nn
+from torchvision.models import resnet50, ResNet50_Weights
 
 
 class SegFormerEncoder(nn.Module):
@@ -23,62 +27,74 @@ class SegFormerEncoder(nn.Module):
         self.in_channels = in_channels
         self.pretrained = pretrained
 
-        # Prefer HuggingFace SegFormer for 'mit_*' backbones.
-        # Fallback to Tiny CNN if HF unavailable or unsupported.
         self.hf = None
-        prefer_hf = backbone.startswith("mit_") or backbone.startswith("segformer")
-        if prefer_hf:
-            # HF -> tiny
-            try:
-                self.hf = _HFEncoderWrapper(in_channels, backbone, pretrained)
-                self.feature_dims = self.hf.feature_dims
-            except Exception:
-                self.hf = None
-                self.fallback = _TinyEncoder(in_channels)
-                self.feature_dims = [64, 128, 320, 512]
+        self.resnet = None
+
+        # SegFormer path
+        if backbone.startswith("mit_") or backbone.startswith("segformer"):
+            self.hf = _HFEncoderWrapper(in_channels, backbone, pretrained)
+            self.feature_dims = self.hf.feature_dims
+        # ResNet-50 path
+        elif backbone in ("resnet50", "resnet-50", "resnet_50"):
+            self.resnet = _ResNetEncoderWrapper(in_channels, pretrained)
+            self.feature_dims = self.resnet.feature_dims
         else:
-            # tiny
-            self.fallback = _TinyEncoder(in_channels)
-            self.feature_dims = [64, 128, 320, 512]
+            raise ValueError(
+                f"Unsupported backbone '{backbone}'. Use one of: mit_b[0-5], segformer*, resnet50."
+            )
 
     def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
         if self.hf is not None:
             return self.hf(x)
-        else:
-            return self.fallback(x)
+        if self.resnet is not None:
+            return self.resnet(x)
+        raise AssertionError("No encoder instantiated")
 
 
-class _TinyEncoder(nn.Module):
-    def __init__(self, in_chans: int):
+class _ResNetEncoderWrapper(nn.Module):
+    def __init__(self, in_chans: int, pretrained: bool):
         super().__init__()
-        # Output strides: 4, 8, 16, 32 with channels 64,128,320,512
-        self.stem = nn.Sequential(
-            nn.Conv2d(in_chans, 64, kernel_size=7, stride=4, padding=3, bias=False),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-        )
-        self.stage1 = nn.Sequential(
-            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-        )
-        self.stage2 = nn.Sequential(
-            nn.Conv2d(128, 320, kernel_size=3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(320),
-            nn.ReLU(inplace=True),
-        )
-        self.stage3 = nn.Sequential(
-            nn.Conv2d(320, 512, kernel_size=3, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(512),
-            nn.ReLU(inplace=True),
-        )
+        # Build base ResNet-50
+        if pretrained:
+            self.model = resnet50(weights=ResNet50_Weights.DEFAULT)
+        else:
+            self.model = resnet50(weights=None)
+
+        # Adjust input stem for arbitrary channel count
+        if in_chans != 3:
+            old_conv = self.model.conv1
+            new_conv = nn.Conv2d(
+                in_chans, old_conv.out_channels, kernel_size=old_conv.kernel_size[0],
+                stride=old_conv.stride[0], padding=old_conv.padding[0], bias=False
+            )
+            with torch.no_grad():
+                if pretrained and old_conv.weight.shape[1] == 3:
+                    w = old_conv.weight  # [64, 3, 7, 7]
+                    if in_chans > 3:
+                        w_mean = w.mean(dim=1, keepdim=True)
+                        new_w = w_mean.repeat(1, in_chans, 1, 1)
+                    else:
+                        new_w = w[:, :in_chans, :, :]
+                    new_conv.weight.copy_(new_w)
+                else:
+                    nn.init.kaiming_normal_(new_conv.weight, mode="fan_out", nonlinearity="relu")
+            self.model.conv1 = new_conv
+
+        self.feature_dims = [256, 512, 1024, 2048]
 
     def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
-        c0 = self.stem(x)  # 1/4
-        c1 = self.stage1(c0)  # 1/8
-        c2 = self.stage2(c1)  # 1/16
-        c3 = self.stage3(c2)  # 1/32
-        return [c0, c1, c2, c3]
+        # Stem
+        x = self.model.conv1(x)
+        x = self.model.bn1(x)
+        x = self.model.relu(x)
+        x = self.model.maxpool(x)  # 1/4
+
+        # Stages
+        c1 = self.model.layer1(x)  # 1/4, 256
+        c2 = self.model.layer2(c1)  # 1/8, 512
+        c3 = self.model.layer3(c2)  # 1/16, 1024
+        c4 = self.model.layer4(c3)  # 1/32, 2048
+        return [c1, c2, c3, c4]
 
 
 class _HFEncoderWrapper(nn.Module):
