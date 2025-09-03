@@ -670,13 +670,14 @@ def validate(
     t0 = time.time()
     total_tiles = 0
     target_n = min(len(dset_val), max_images)
+    idxs = random.sample(range(len(dset_val)), k=target_n)
     print(
         f"[Eval] Started: N={target_n}/{len(dset_val)} coarse={coarse_size} patch={fine_patch_size} overlap={fine_overlap} stride={fine_patch_size - fine_overlap} fine_batch={fine_batch}",
         flush=True,
     )
-    for i in range(target_n):
-        if (i % 2) == 0:
-            print(f"[Eval] Running... {i}/{target_n}", flush=True)
+    for j, i in enumerate(idxs):
+        if (j % 2) == 0:
+            print(f"[Eval] Running... {j}/{target_n}", flush=True)
         item = dset_val[i]
         img = item["image"].astype(np.float32) / 255.0  # HxWx3
         mask = item["mask"].astype(np.uint8)
