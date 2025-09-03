@@ -339,6 +339,42 @@ def main():
         step += 1
         pbar.update(1)
 
+    # Save a final checkpoint upon completion
+    _save_checkpoint(
+        os.path.join(out_dir, f"ckpt_{iters}.pt"), step, model, optim, scaler, best_f1
+    )
+
+    # Final test evaluation
+    if dset_test is not None:
+        torch.cuda.empty_cache()
+        model.eval()
+        print(
+            f"[WireSegHR][train] Final test starting... test_size={len(dset_test)} patch={eval_patch_size} overlap={overlap} stride={eval_patch_size - overlap} fine_batch={eval_fine_batch}",
+            flush=True,
+        )
+        test_stats = validate(
+            model,
+            dset_test,
+            coarse_test,
+            device,
+            amp_enabled,
+            amp_dtype,
+            prob_thresh,
+            mm_enable,
+            mm_kernel,
+            eval_patch_size,
+            overlap,
+            eval_fine_batch,
+            len(dset_test),
+        )
+        print(
+            f"[Test Final][Fine]   IoU={test_stats['iou']:.4f} F1={test_stats['f1']:.4f} P={test_stats['precision']:.4f} R={test_stats['recall']:.4f}"
+        )
+        print(
+            f"[Test Final][Coarse] IoU={test_stats['iou_coarse']:.4f} F1={test_stats['f1_coarse']:.4f} P={test_stats['precision_coarse']:.4f} R={test_stats['recall_coarse']:.4f}"
+        )
+        model.train()
+
     print("[WireSegHR][train] Done.")
 
 
