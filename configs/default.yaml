@@ -1,6 +1,6 @@
 # Default configuration for WireSegHR (segmentation-only)
 backbone: mit_b2
-pretrained: true  # Uses HF SegFormer weights if available; else timm or tiny fallback
+pretrained: true  # Uses HF SegFormer weights if available
 
 coarse:
   train_size: 512
@@ -32,7 +32,7 @@ eval:
   fine_batch: 16
 
 optim:
-  iters: 2000
+  iters: 10000
   batch_size: 4
   lr: 6e-5
   weight_decay: 0.01
@@ -43,9 +43,9 @@ optim:
 # training housekeeping
 seed: 42
 out_dir: runs/wireseghr
-eval_interval: 150
-ckpt_interval: 300
-# resume: runs/wireseghr/ckpt_1800.pt  # optional
+eval_interval: 200
+ckpt_interval: 400
+resume: runs/wireseghr/ckpt_1800.pt  # optional
 
 # dataset paths (placeholders)
 data:

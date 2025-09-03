@@ -9,7 +9,7 @@ This plan distills the model and pipeline described in the paper sources:
 Focus: segmentation only (no dataset collection or inpainting).
 
 ## Decisions and Defaults (locked)
-- Backbone: SegFormer MiT-B3 via HuggingFace Transformers (shared encoder `E`), with `timm` or tiny CNN fallback.
+- Backbone: SegFormer MiT-B3 via HuggingFace Transformers.
 - Fine/local patch size p: 768.
 - Conditioning: global map + binary location mask by default (Table `tables/logit.tex`).
 - Conditioning map scope: patch-cropped from the global map per `paper-tex/sections/method_yq.tex` (no full-image concatenation variant).
@@ -21,7 +21,7 @@ Focus: segmentation only (no dataset collection or inpainting).
 
 ## Project Structure
 - `configs/`
-  - `default.yaml` (backbone=mit_b2, p=768, coarse_train=512, coarse_test=1024, alpha=0.01, minmax=true, kernel=6, maxpool_label=true, cond_variant=global+binary_mask)
+  - `default.yaml` (backbone=mit_b2, p=768, coarse_train=512, coarse_test=1024, alpha=0.01, minmax=true, kernel=6, maxpool_label=true, cond_variant=global)
 - `src/wireseghr/`
   - `model/`
     - `encoder.py` (SegFormer MiT-B3, N_in channels expansion)
@@ -53,7 +53,6 @@ Focus: segmentation only (no dataset collection or inpainting).
   - Binary location mask: 1 inside current patch region (in full-image coordinates), 0 elsewhere.
   - Pass patch-aligned cond crop and binary mask as channels to the fine branch input.
 - Notes:
-  - We expose a config toggle to switch conditioning variant between: `global+binary_mask` (default) and `global_only` (Table `tables/logit.tex`).
   - We follow the published version (`paper-tex/sections/method_yq.tex`) and use patch-cropped conditioning exclusively; no full-image conditioning variant will be implemented.
 
 ## Data and Preprocessing
@@ -103,7 +102,6 @@ Focus: segmentation only (no dataset collection or inpainting).
 ## Metrics and Reporting
 - Implement: IoU, F1, Precision, Recall (global, and optionally per-size bins if available) matching `tables/component.tex`.
 - Validate α trade-offs following `tables/thresholds.tex`.
-- Ablations: MinMax on/off, MaxPool on/off, conditioning variant (Table `tables/logit.tex`).
 
 ## Configuration Surface (key)
 - Backbone/weights: `mit_b2` (pretrained ImageNet-1K).

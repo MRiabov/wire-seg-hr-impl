@@ -31,14 +31,8 @@ python src/wireseghr/infer.py --config configs/default.yaml --image /path/to/ima
 - Defaults locked: SegFormer MiT-B3 encoder, patch size 768, MinMax 6×6, global+binary mask conditioning with patch-cropped global map.
 
 ### Backbone Source
-- Preferred: HuggingFace Transformers SegFormer (e.g., `nvidia/mit-b3`). We set `num_channels` to match input channels.
-- Optional: `timm` features_only if a compatible SegFormer is available.
+- HuggingFace Transformers SegFormer (e.g., `nvidia/mit-b3`). We set `num_channels` to match input channels.
 - Fallback: a small internal CNN that preserves 1/4, 1/8, 1/16, 1/32 strides with channels [64, 128, 320, 512].
-
-Install requirements to get Transformers:
-```
-pip install -r requirements.txt
-```
 
 ## Dataset Convention
 - Flat directories with numeric filenames; images are `.jpg`/`.jpeg`, masks are `.png`.

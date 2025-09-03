@@ -1,14 +1,14 @@
 """SegFormer MiT encoder wrapper with adjustable input channels.
 
-Uses timm to instantiate MiT (e.g., mit_b2) and returns a list of multi-scale
-features [C1, C2, C3, C4].
+Uses HuggingFace Transformers SegFormer (e.g., mit_b2) and returns a list of
+multi-scale features [C1, C2, C3, C4]. Falls back to a tiny CNN if HF isn't
+available.
 """
 
 from typing import List, Tuple
 
 import torch
 import torch.nn as nn
-import timm
 
 
 class SegFormerEncoder(nn.Module):
@@ -17,66 +17,32 @@ class SegFormerEncoder(nn.Module):
         backbone: str = "mit_b2",
         in_channels: int = 6,
         pretrained: bool = True,
-        out_indices: Tuple[int, int, int, int] = (0, 1, 2, 3),
     ):
         super().__init__()
         self.backbone_name = backbone
         self.in_channels = in_channels
         self.pretrained = pretrained
-        self.out_indices = out_indices
 
         # Prefer HuggingFace SegFormer for 'mit_*' backbones.
-        # Otherwise try timm features_only. Always have Tiny CNN fallback.
-        self.encoder = None
+        # Fallback to Tiny CNN if HF unavailable or unsupported.
         self.hf = None
         prefer_hf = backbone.startswith("mit_") or backbone.startswith("segformer")
         if prefer_hf:
-            # HF -> timm -> tiny
+            # HF -> tiny
             try:
                 self.hf = _HFEncoderWrapper(in_channels, backbone, pretrained)
                 self.feature_dims = self.hf.feature_dims
             except Exception:
-                try:
-                    self.encoder = timm.create_model(
-                        backbone,
-                        pretrained=pretrained,
-                        features_only=True,
-                        out_indices=out_indices,
-                        in_chans=in_channels,
-                    )
-                    self.feature_dims = list(self.encoder.feature_info.channels())
-                except Exception:
-                    self.encoder = None
-                    self.fallback = _TinyEncoder(in_channels)
-                    self.feature_dims = [64, 128, 320, 512]
+                self.hf = None
+                self.fallback = _TinyEncoder(in_channels)
+                self.feature_dims = [64, 128, 320, 512]
         else:
-            # timm -> HF -> tiny
-            try:
-                self.encoder = timm.create_model(
-                    backbone,
-                    pretrained=pretrained,
-                    features_only=True,
-                    out_indices=out_indices,
-                    in_chans=in_channels,
-                )
-                self.feature_dims = list(self.encoder.feature_info.channels())
-            except Exception:
-                try:
-                    self.hf = _HFEncoderWrapper(in_channels, backbone, pretrained)
-                    self.feature_dims = self.hf.feature_dims
-                except Exception:
-                    self.encoder = None
-                    self.fallback = _TinyEncoder(in_channels)
-                    self.feature_dims = [64, 128, 320, 512]
+            # tiny
+            self.fallback = _TinyEncoder(in_channels)
+            self.feature_dims = [64, 128, 320, 512]
 
     def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
-        if self.encoder is not None:
-            feats = self.encoder(x)
-            assert isinstance(feats, (list, tuple)) and len(feats) == len(
-                self.out_indices
-            )
-            return list(feats)
-        elif self.hf is not None:
+        if self.hf is not None:
             return self.hf(x)
         else:
             return self.fallback(x)

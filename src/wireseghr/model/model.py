@@ -14,7 +14,7 @@ class WireSegHR(nn.Module):
 
     Expects callers to prepare input channel stacks according to the plan:
     - Coarse input: RGB + MinMax (and any extra channels per config), shape (B, Cc, Hc, Wc)
-    - Fine input: RGB + MinMax + cond_crop + binary_location_mask, shape (B, Cf, p, p)
+    - Fine input: RGB + MinMax + cond_crop, shape (B, Cf, p, p)
 
     Conditioning 1x1 is applied to coarse logits to produce a single-channel map.
     """
