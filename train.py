@@ -93,13 +93,30 @@ def main():
     base_lr = float(cfg["optim"]["lr"])  # 6e-5
     weight_decay = float(cfg["optim"]["weight_decay"])  # 0.01
     power = float(cfg["optim"]["power"])  # 1.0
-    amp_flag = bool(cfg["optim"].get("amp", True))
+    precision = str(cfg["optim"].get("precision", "fp32")).lower()
+    assert precision in ("fp32", "fp16", "bf16")
+    # Enable AMP only when requested and on CUDA
+    amp_enabled = (device.type == "cuda") and (precision in ("fp16", "bf16"))
+    # Fail fast on unsupported hardware if mixed precision is requested
+    if amp_enabled:
+        cc_major, cc_minor = torch.cuda.get_device_capability()
+        if precision == "fp16":
+            assert (
+                cc_major >= 7
+            ), f"fp16 requires Volta (SM 7.0)+; current SM {cc_major}.{cc_minor}"
+        elif precision == "bf16":
+            assert (
+                cc_major >= 8
+            ), f"bf16 requires Ampere (SM 8.0)+; current SM {cc_major}.{cc_minor}"
+    amp_dtype = (
+        torch.float16 if precision == "fp16" else (torch.bfloat16 if precision == "bf16" else None)
+    )
 
     # Housekeeping
     seed = int(cfg.get("seed", 42))
     out_dir = cfg.get("out_dir", "runs/wireseghr")
-    eval_interval = int(cfg.get("eval_interval", 500))
-    ckpt_interval = int(cfg.get("ckpt_interval", 1000))
+    eval_interval = int(cfg["eval_interval"])
+    ckpt_interval = int(cfg["ckpt_interval"])
     os.makedirs(out_dir, exist_ok=True)
     set_seed(seed)
 
@@ -161,7 +178,7 @@ def main():
 
     # Optimizer and loss
     optim = torch.optim.AdamW(model.parameters(), lr=base_lr, weight_decay=weight_decay)
-    scaler = GradScaler("cuda", enabled=(device.type == "cuda" and amp_flag))
+    scaler = GradScaler("cuda", enabled=(device.type == "cuda" and precision == "fp16"))
     ce = nn.CrossEntropyLoss()
 
     # Resume
@@ -190,9 +207,7 @@ def main():
             imgs, masks, coarse_train, patch_size, sampler, minmax, device
         )
 
-        with autocast(
-            device_type=device.type, enabled=(device.type == "cuda" and amp_flag)
-        ):
+        with autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_enabled):
             logits_coarse, cond_map = model.forward_coarse(
                 batch["x_coarse"]
             )  # (B,2,Hc/4,Wc/4) and (B,1,Hc/4,Wc/4)
@@ -200,9 +215,7 @@ def main():
         # Build fine inputs: crop cond from low-res map to patch, concat with patch RGB+MinMax and loc mask
         B, _, hc4, wc4 = cond_map.shape
         x_fine = _build_fine_inputs(batch, cond_map, device)
-        with autocast(
-            device_type=device.type, enabled=(device.type == "cuda" and amp_flag)
-        ):
+        with autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_enabled):
             logits_fine = model.forward_fine(x_fine)
 
             # Targets
@@ -241,7 +254,8 @@ def main():
                 dset_val,
                 coarse_train,
                 device,
-                amp_flag,
+                amp_enabled,
+                amp_dtype,
                 prob_thresh,
                 mm_enable,
                 mm_kernel,
@@ -284,7 +298,7 @@ def main():
                     coarse_train,
                     device,
                     os.path.join(out_dir, f"test_vis_{step}"),
-                    amp_flag,
+                    amp_enabled,
                     mm_enable,
                     mm_kernel,
                     prob_thresh,
@@ -549,6 +563,7 @@ def validate(
     coarse_size: int,
     device: torch.device,
     amp_flag: bool,
+    amp_dtype,
     prob_thresh: float,
     minmax_enable: bool,
     minmax_kernel: int,
@@ -604,9 +619,7 @@ def validate(
         )[0]
         zeros_c = torch.zeros(1, coarse_size, coarse_size, device=device)
         x_t = torch.cat([rgb_c, y_min_c, y_max_c, zeros_c], dim=0).unsqueeze(0)
-        with autocast(
-            device_type=device.type, enabled=(device.type == "cuda" and amp_flag)
-        ):
+        with autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_flag):
             logits_c, cond_map = model.forward_coarse(x_t)
         prob = torch.softmax(logits_c, dim=1)[:, 1:2]
         prob_up = (
@@ -669,10 +682,7 @@ def validate(
 
             x_f_batch = torch.cat(xs_list, dim=0)  # Bx6xPxP
 
-            with autocast(
-                device_type=device.type,
-                enabled=(device.type == "cuda" and amp_flag),
-            ):
+            with autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_flag):
                 logits_f = model.forward_fine(x_f_batch)
                 prob_f = torch.softmax(logits_f, dim=1)[:, 1:2]
                 prob_f_up = F.interpolate(
@@ -758,9 +768,7 @@ def save_test_visuals(
         )[0]
         zeros_c = torch.zeros(1, coarse_size, coarse_size, device=device)
         x_t = torch.cat([rgb_c, y_min_c, y_max_c, zeros_c], dim=0).unsqueeze(0)
-        with autocast(
-            device_type=device.type, enabled=(device.type == "cuda" and amp_flag)
-        ):
+        with autocast(device_type=device.type, dtype=None, enabled=amp_flag):
             logits_c, _ = model.forward_coarse(x_t)
         prob = torch.softmax(logits_c, dim=1)[:, 1:2]
         prob_up = (
