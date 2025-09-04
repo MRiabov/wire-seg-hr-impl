@@ -129,3 +129,10 @@ exports/
 *.onnx
 *.trt
 *.nnx
+
+#paper files
+*.pdf
+*.tar.gz
+paper-tex/fixure_tex/
+paper-tex/figures/
+
