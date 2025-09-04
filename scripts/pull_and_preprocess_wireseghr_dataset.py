@@ -46,12 +46,10 @@ def list_files_with_paths(drive, folder_id, prefix=""):
     }
     for file in drive.ListFile(params).GetList():
         if file["mimeType"] == "application/vnd.google-apps.folder":
-            sub_prefix = (
-                os.path.join(prefix, file["title"]) if prefix else file["title"]
-            )
+            sub_prefix = (f"{prefix}/{file['title']}" if prefix else file["title"]) 
             items += list_files_with_paths(drive, file["id"], sub_prefix)
         else:
-            rel_path = os.path.join(prefix, file["title"]) if prefix else file["title"]
+            rel_path = f"{prefix}/{file['title']}" if prefix else file["title"]
             size = int(file.get("fileSize", 0)) if "fileSize" in file else 0
             items.append(
                 {
@@ -67,7 +65,7 @@ def list_files_with_paths(drive, folder_id, prefix=""):
 
 def download_folder(folder_id, dest, service_account_json, workers: int):
     drive = authenticate(service_account_json)
-    os.makedirs(dest, exist_ok=True)
+    Path(dest).mkdir(parents=True, exist_ok=True)
 
     print(f"Listing files in folder {folder_id}...")
     files_with_paths = list_files_with_paths(drive, folder_id)
@@ -78,16 +76,16 @@ def download_folder(folder_id, dest, service_account_json, workers: int):
     tasks = []
     skipped = 0
     for meta in files_with_paths:
-        out_path = os.path.join(dest, meta["rel_path"])
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        out_path = Path(dest) / meta["rel_path"]
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         if (
             meta["size"] > 0
-            and os.path.exists(out_path)
-            and os.path.getsize(out_path) == meta["size"]
+            and out_path.exists()
+            and out_path.stat().st_size == meta["size"]
         ):
             skipped += 1
             continue
-        tasks.append((meta["id"], out_path))
+        tasks.append((meta["id"], str(out_path)))
 
     print(f"Skipping {skipped} existing files; {len(tasks)} to download.")
 
@@ -213,7 +211,7 @@ def split_test_train_val(args=None):
             try:
                 if dst.exists() or dst.is_symlink():
                     dst.unlink()
-                os.symlink(src, dst)
+                os.symlink(str(src), str(dst))
             except FileExistsError:
                 pass
         else:  # copy
@@ -221,11 +219,11 @@ def split_test_train_val(args=None):
                 dst.unlink()
             # use hardlink if possible to be fast and space efficient
             try:
-                os.link(src, dst)
+                os.link(str(src), str(dst))
             except OSError:
                 import shutil
 
-                shutil.copy2(src, dst)
+                shutil.copy2(str(src), str(dst))
 
     for split_name, split_ids in (
         ("train", train_idx),

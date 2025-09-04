@@ -18,12 +18,13 @@ except Exception as e:  # pragma: no cover
     ) from e
 
 import yaml
+from pathlib import Path
 
 
 # ---- Utility: TRT engine wrapper ----
 class TrtEngine:
     def __init__(self, engine_path: str):
-        assert os.path.isfile(engine_path), f"Engine not found: {engine_path}"
+        assert Path(engine_path).is_file(), f"Engine not found: {engine_path}"
         logger = trt.Logger(trt.Logger.ERROR)
         with open(engine_path, 'rb') as f, trt.Runtime(logger) as runtime:
             self.engine = runtime.deserialize_cuda_engine(f.read())
@@ -270,7 +271,7 @@ def infer_image_trt(
     save_prob: bool = False,
     prob_thresh: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    assert os.path.isfile(img_path), f"Image not found: {img_path}"
+    assert Path(img_path).is_file(), f"Image not found: {img_path}"
     bgr = cv2.imread(img_path, cv2.IMREAD_COLOR)
     assert bgr is not None, f"Failed to read {img_path}"
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
@@ -301,13 +302,13 @@ def infer_image_trt(
     pred = (prob_f > prob_thresh).astype(np.uint8) * 255
 
     if out_dir is not None:
-        os.makedirs(out_dir, exist_ok=True)
-        stem = os.path.splitext(os.path.basename(img_path))[0]
-        out_mask = os.path.join(out_dir, f"{stem}_pred.png")
-        cv2.imwrite(out_mask, pred)
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
+        stem = Path(img_path).stem
+        out_mask = Path(out_dir) / f"{stem}_pred.png"
+        cv2.imwrite(str(out_mask), pred)
         if save_prob:
-            out_prob = os.path.join(out_dir, f"{stem}_prob.npy")
-            np.save(out_prob, prob_f.astype(np.float32))
+            out_prob = Path(out_dir) / f"{stem}_prob.npy"
+            np.save(str(out_prob), prob_f.astype(np.float32))
 
     return pred, prob_f
 
@@ -341,7 +342,7 @@ def main():
 
     if args.benchmark:
         bench_dir = args.bench_images_dir or cfg["data"]["test_images"]
-        assert os.path.isdir(bench_dir), f"Not a directory: {bench_dir}"
+        assert Path(bench_dir).is_dir(), f"Not a directory: {bench_dir}"
         size_filter: Optional[Tuple[int, int]] = None
         if args.bench_size_filter:
             try:
@@ -353,7 +354,7 @@ def main():
                 )
         img_files = sorted(
             [
-                os.path.join(bench_dir, p)
+                str(Path(bench_dir) / p)
                 for p in os.listdir(bench_dir)
                 if p.lower().endswith((".jpg", ".jpeg"))
             ]
@@ -473,12 +474,12 @@ def main():
         return
 
     img_dir = args.images_dir
-    assert os.path.isdir(img_dir)
-    os.makedirs(args.out, exist_ok=True)
+    assert Path(img_dir).is_dir()
+    Path(args.out).mkdir(parents=True, exist_ok=True)
     img_files = sorted([p for p in os.listdir(img_dir) if p.lower().endswith((".jpg", ".jpeg"))])
     assert len(img_files) > 0
     for name in img_files:
-        p = os.path.join(img_dir, name)
+        p = str(Path(img_dir) / name)
         infer_image_trt(coarse, fine, p, cfg, out_dir=args.out, save_prob=args.save_prob)
     print("[TRT][infer] Done.")
 

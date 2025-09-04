@@ -24,6 +24,7 @@ from src.wireseghr.model.label_downsample import downsample_label_maxpool
 from src.wireseghr.data.sampler import BalancedPatchSampler
 from src.wireseghr.metrics import compute_metrics
 from infer import _coarse_forward, _tiled_fine_forward
+from pathlib import Path
 
 
 class SizeBatchSampler:
@@ -76,8 +77,8 @@ def main():
     args = parser.parse_args()
 
     cfg_path = args.config
-    if not os.path.isabs(cfg_path):
-        cfg_path = os.path.join(os.getcwd(), cfg_path)
+    if not Path(cfg_path).is_absolute():
+        cfg_path = str(Path.cwd() / cfg_path)
 
     with open(cfg_path, "r") as f:
         cfg = yaml.safe_load(f)
@@ -200,7 +201,7 @@ def main():
     start_step = 0
     best_f1 = -1.0
     resume_path = cfg.get("resume", None)
-    if resume_path and os.path.isfile(resume_path):
+    if resume_path and Path(resume_path).is_file():
         print(f"[WireSegHR][train] Resuming from {resume_path}")
         start_step, best_f1 = _load_checkpoint(
             resume_path, model, optim, scaler, device
@@ -303,7 +304,7 @@ def main():
             if val_stats["f1"] > best_f1:
                 best_f1 = val_stats["f1"]
                 _save_checkpoint(
-                    os.path.join(out_dir, "best.pt"),
+                    str(Path(out_dir) / "best.pt"),
                     step,
                     model,
                     optim,
@@ -313,7 +314,7 @@ def main():
             # Save periodic ckpt
             if ckpt_interval > 0 and (step % ckpt_interval == 0):
                 _save_checkpoint(
-                    os.path.join(out_dir, f"ckpt_{step}.pt"),
+                    str(Path(out_dir) / f"ckpt_{step}.pt"),
                     step,
                     model,
                     optim,
@@ -327,7 +328,7 @@ def main():
                     dset_test,
                     coarse_test,
                     device,
-                    os.path.join(out_dir, f"test_vis_{step}"),
+                    str(Path(out_dir) / f"test_vis_{step}"),
                     amp_enabled,
                     mm_enable,
                     mm_kernel,
@@ -341,7 +342,7 @@ def main():
 
     # Save a final checkpoint upon completion
     _save_checkpoint(
-        os.path.join(out_dir, f"ckpt_{iters}.pt"), step, model, optim, scaler, best_f1
+        str(Path(out_dir) / f"ckpt_{iters}.pt"), step, model, optim, scaler, best_f1
     )
 
     # Final test evaluation
@@ -374,10 +375,10 @@ def main():
             f"[Test Final][Coarse] IoU={test_stats['iou_coarse']:.4f} F1={test_stats['f1_coarse']:.4f} P={test_stats['precision_coarse']:.4f} R={test_stats['recall_coarse']:.4f}"
         )
         # Save final evaluation artifacts
-        final_out = os.path.join(out_dir, f"final_vis_{step}")
-        os.makedirs(final_out, exist_ok=True)
+        final_out = Path(out_dir) / f"final_vis_{step}"
+        final_out.mkdir(parents=True, exist_ok=True)
         # Dump metrics for record
-        with open(os.path.join(final_out, "metrics.yaml"), "w") as f:
+        with open(final_out / "metrics.yaml", "w") as f:
             yaml.safe_dump({**test_stats, "step": step}, f, sort_keys=False)
         # Save predictions (fine + coarse) for the whole test set
         save_final_visuals(
@@ -385,7 +386,7 @@ def main():
             dset_test,
             coarse_test,
             device,
-            final_out,
+            str(final_out),
             amp_enabled,
             amp_dtype,
             prob_thresh,
@@ -615,7 +616,7 @@ def _save_checkpoint(
     scaler: GradScaler,
     best_f1: float,
 ):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     state = {
         "step": step,
         "model": model.state_dict(),
@@ -765,7 +766,7 @@ def save_test_visuals(
     prob_thresh: float,
     max_samples: int = 8,
 ):
-    os.makedirs(out_dir, exist_ok=True)
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
     for i in range(min(max_samples, len(dset_test))):
         item = dset_test[i]
         img = item["image"].astype(np.float32) / 255.0
@@ -783,8 +784,8 @@ def save_test_visuals(
         pred = ((prob_up > prob_thresh).to(torch.uint8) * 255).cpu().numpy()
         # Save input and prediction
         img_bgr = (img[..., ::-1] * 255.0).astype(np.uint8)
-        cv2.imwrite(os.path.join(out_dir, f"{i:03d}_input.jpg"), img_bgr)
-        cv2.imwrite(os.path.join(out_dir, f"{i:03d}_pred.png"), pred)
+        cv2.imwrite(str(Path(out_dir) / f"{i:03d}_input.jpg"), img_bgr)
+        cv2.imwrite(str(Path(out_dir) / f"{i:03d}_pred.png"), pred)
 
 
 @torch.no_grad()
@@ -803,7 +804,7 @@ def save_final_visuals(
     fine_overlap: int,
     fine_batch: int,
 ):
-    os.makedirs(out_dir, exist_ok=True)
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
     for i in range(len(dset_test)):
         item = dset_test[i]
         img = item["image"].astype(np.float32) / 255.0
@@ -838,9 +839,9 @@ def save_final_visuals(
         # Save input and predictions
         img_bgr = (img[..., ::-1] * 255.0).astype(np.uint8)
         base = f"{i:03d}"
-        cv2.imwrite(os.path.join(out_dir, f"{base}_input.jpg"), img_bgr)
-        cv2.imwrite(os.path.join(out_dir, f"{base}_coarse_pred.png"), pred_coarse)
-        cv2.imwrite(os.path.join(out_dir, f"{base}_fine_pred.png"), pred_fine)
+        cv2.imwrite(str(Path(out_dir) / f"{base}_input.jpg"), img_bgr)
+        cv2.imwrite(str(Path(out_dir) / f"{base}_coarse_pred.png"), pred_coarse)
+        cv2.imwrite(str(Path(out_dir) / f"{base}_fine_pred.png"), pred_fine)
 
 
 if __name__ == "__main__":

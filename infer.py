@@ -10,8 +10,10 @@ import cv2
 import torch
 import torch.nn.functional as F
 from torch.amp import autocast
+from tqdm import tqdm
 
 from src.wireseghr.model import WireSegHR
+from pathlib import Path
 
 
 def _pad_for_minmax(kernel: int) -> Tuple[int, int, int, int]:
@@ -179,7 +181,7 @@ def infer_image(
     save_prob: bool = False,
     prob_thresh: Optional[float] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    assert os.path.isfile(img_path), f"Image not found: {img_path}"
+    assert Path(img_path).is_file(), f"Image not found: {img_path}"
     bgr = cv2.imread(img_path, cv2.IMREAD_COLOR)
     assert bgr is not None, f"Failed to read {img_path}"
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
@@ -223,11 +225,11 @@ def infer_image(
 
     if out_dir is not None:
         os.makedirs(out_dir, exist_ok=True)
-        stem = os.path.splitext(os.path.basename(img_path))[0]
-        out_mask = os.path.join(out_dir, f"{stem}_pred.png")
-        cv2.imwrite(out_mask, pred)
+        stem = Path(img_path).stem
+        out_mask = Path(out_dir) / f"{stem}_pred.png"
+        cv2.imwrite(str(out_mask), pred)
         if save_prob:
-            out_prob = os.path.join(out_dir, f"{stem}_prob.npy")
+            out_prob = Path(out_dir) / f"{stem}_prob.npy"
             np.save(out_prob, prob_f.detach().cpu().float().numpy())
 
     # Return numpy arrays for external consumers, computed via torch
@@ -298,8 +300,8 @@ def main():
     args = parser.parse_args()
 
     cfg_path = args.config
-    if not os.path.isabs(cfg_path):
-        cfg_path = os.path.join(os.getcwd(), cfg_path)
+    if not Path(cfg_path).is_absolute():
+        cfg_path = str(Path.cwd() / cfg_path)
 
     with open(cfg_path, "r") as f:
         cfg = yaml.safe_load(f)
@@ -327,7 +329,7 @@ def main():
 
     ckpt_path = args.ckpt if args.ckpt else cfg.get("resume", "")
     if ckpt_path:
-        assert os.path.isfile(ckpt_path), f"Checkpoint not found: {ckpt_path}"
+        assert Path(ckpt_path).is_file(), f"Checkpoint not found: {ckpt_path}"
         print(f"[WireSegHR][infer] Loading checkpoint: {ckpt_path}")
         state = torch.load(ckpt_path, map_location=device)
         model.load_state_dict(state["model"])
@@ -339,7 +341,7 @@ def main():
             bench_dir = args.bench_images_dir
         else:
             bench_dir = cfg["data"]["test_images"]
-        assert os.path.isdir(bench_dir), f"Not a directory: {bench_dir}"
+        assert Path(bench_dir).is_dir(), f"Not a directory: {bench_dir}"
 
         size_filter: Optional[Tuple[int, int]] = None
         if args.bench_size_filter:
@@ -353,7 +355,7 @@ def main():
 
         img_files = sorted(
             [
-                os.path.join(bench_dir, p)
+                str(Path(bench_dir) / p)
                 for p in os.listdir(bench_dir)
                 if p.lower().endswith((".jpg", ".jpeg"))
             ]
@@ -386,7 +388,7 @@ def main():
         timings: List[Dict[str, Any]] = []
 
         # Warmup
-        for i in range(min(args.bench_warmup, len(img_files))):
+        for i in tqdm(range(min(args.bench_warmup, len(img_files))), desc="[bench] Warmup"):
             _ = infer_image(
                 model,
                 img_files[i],
@@ -399,7 +401,7 @@ def main():
             )
 
         # Timed runs
-        for p in img_files[args.bench_warmup :]:
+        for p in tqdm(img_files[args.bench_warmup :], desc="[bench] Timed"):
             # Replicate internals to time coarse vs fine separately
             bgr = cv2.imread(p, cv2.IMREAD_COLOR)
             assert bgr is not None, f"Failed to read {p}"
@@ -487,7 +489,9 @@ def main():
                 },
                 "per_image": timings,
             }
-            with open(args.bench_report_json, "w") as f:
+            report_path = args.bench_report_json
+            Path(report_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(report_path, "w") as f:
                 json.dump(report, f, indent=2)
 
         return
@@ -508,14 +512,14 @@ def main():
 
     # Directory mode
     img_dir = args.images_dir
-    assert os.path.isdir(img_dir), f"Not a directory: {img_dir}"
+    assert Path(img_dir).is_dir(), f"Not a directory: {img_dir}"
     img_files = sorted(
         [p for p in os.listdir(img_dir) if p.lower().endswith((".jpg", ".jpeg"))]
     )
     assert len(img_files) > 0, f"No .jpg/.jpeg in {img_dir}"
     os.makedirs(args.out, exist_ok=True)
-    for name in img_files:
-        path = os.path.join(img_dir, name)
+    for name in tqdm(img_files, desc="[infer] Dir"):
+        path = str(Path(img_dir) / name)
         infer_image(
             model,
             path,

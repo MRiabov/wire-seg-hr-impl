@@ -123,3 +123,10 @@ dataset/
 
 #runs 
 runs/
+*.pt
+
+#exports
+exports/
+*.onnx
+*.trt
+*.nnx
