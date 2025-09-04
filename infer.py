@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 from src.wireseghr.model import WireSegHR
 from pathlib import Path
+from src.wireseghr.metrics import compute_metrics
 
 
 def _pad_for_minmax(kernel: int) -> Tuple[int, int, int, int]:
@@ -260,6 +261,24 @@ def main():
     parser.add_argument(
         "--save_prob", action="store_true", help="Also save probability .npy"
     )
+    # Metrics options
+    parser.add_argument(
+        "--metrics",
+        action="store_true",
+        help="Compute IoU, F1, Precision, Recall if ground-truth masks are provided",
+    )
+    parser.add_argument(
+        "--mask",
+        type=str,
+        default="",
+        help="Path to ground-truth mask (.png) for --image when --metrics is set",
+    )
+    parser.add_argument(
+        "--masks_dir",
+        type=str,
+        default="",
+        help="Directory with ground-truth masks (.png) for --images_dir when --metrics is set",
+    )
     # Benchmarking options
     parser.add_argument(
         "--benchmark",
@@ -271,6 +290,12 @@ def main():
         type=str,
         default="",
         help="Images dir for benchmark (overrides cfg.data.test_images if set)",
+    )
+    parser.add_argument(
+        "--bench_masks_dir",
+        type=str,
+        default="",
+        help="Masks dir for benchmark (overrides cfg.data.test_masks if set; used with --metrics)",
     )
     parser.add_argument(
         "--bench_limit",
@@ -337,12 +362,14 @@ def main():
 
     # Benchmark mode
     if args.benchmark:
-        if args.bench_images_dir:
-            bench_dir = args.bench_images_dir
-        else:
-            bench_dir = cfg["data"]["test_images"]
+        # Resolve image and mask directories
+        bench_dir = args.bench_images_dir or cfg["data"]["test_images"]
         assert Path(bench_dir).is_dir(), f"Not a directory: {bench_dir}"
+        if args.metrics:
+            bench_masks_dir = args.bench_masks_dir or cfg["data"]["test_masks"]
+            assert Path(bench_masks_dir).is_dir(), f"Not a directory: {bench_masks_dir}"
 
+        # Optional size filter
         size_filter: Optional[Tuple[int, int]] = None
         if args.bench_size_filter:
             try:
@@ -353,6 +380,7 @@ def main():
                     f"Invalid --bench_size_filter format: {args.bench_size_filter} (use HxW)"
                 )
 
+        # Gather images
         img_files = sorted(
             [
                 str(Path(bench_dir) / p)
@@ -375,6 +403,7 @@ def main():
                 f"No images matching {size_filter[0]}x{size_filter[1]} in {bench_dir}"
             )
 
+        # Limit
         if args.bench_limit > 0:
             img_files = img_files[: args.bench_limit]
 
@@ -386,6 +415,11 @@ def main():
                 torch.cuda.synchronize()
 
         timings: List[Dict[str, Any]] = []
+        # Metric accumulators (for timed runs only)
+        if args.metrics:
+            fine_sum: Dict[str, float] = {"iou": 0.0, "f1": 0.0, "precision": 0.0, "recall": 0.0}
+            coarse_sum: Dict[str, float] = {"iou": 0.0, "f1": 0.0, "precision": 0.0, "recall": 0.0}
+            n_metrics = 0
 
         # Warmup
         for i in tqdm(range(min(args.bench_warmup, len(img_files))), desc="[bench] Warmup"):
@@ -442,6 +476,25 @@ def main():
             )
             _sync(); t2 = time.perf_counter()
 
+            # Optional metrics computation
+            if args.metrics:
+                stem = Path(p).stem
+                gt_path = Path(bench_masks_dir) / f"{stem}.png"
+                assert gt_path.is_file(), f"Missing mask for {stem}: {gt_path}"
+                gt = cv2.imread(str(gt_path), cv2.IMREAD_GRAYSCALE)
+                assert gt is not None, f"Failed to read mask: {gt_path}"
+                gt_bin = (gt > 0).astype(np.uint8)
+                prob_thresh = float(cfg["inference"]["prob_threshold"])
+                pred_coarse = (prob_c > prob_thresh).to(torch.uint8).cpu().numpy()
+                pred_fine = (prob_f > prob_thresh).to(torch.uint8).cpu().numpy()
+                m_c = compute_metrics(pred_coarse, gt_bin)
+                m_f = compute_metrics(pred_fine, gt_bin)
+                for k in coarse_sum:
+                    coarse_sum[k] += m_c[k]
+                for k in fine_sum:
+                    fine_sum[k] += m_f[k]
+                n_metrics += 1
+
             timings.append(
                 {
                     "path": p,
@@ -457,6 +510,7 @@ def main():
             print("[WireSegHR][bench] Nothing to benchmark after warmup.")
             return
 
+        # Aggregate
         def _agg(key: str) -> Tuple[float, float, float]:
             vals = sorted([t[key] for t in timings])
             n = len(vals)
@@ -494,10 +548,25 @@ def main():
             with open(report_path, "w") as f:
                 json.dump(report, f, indent=2)
 
+        # Print aggregated metrics if requested
+        if args.metrics:
+            if n_metrics > 0:
+                for k in fine_sum:
+                    fine_sum[k] /= n_metrics
+                for k in coarse_sum:
+                    coarse_sum[k] /= n_metrics
+                print(
+                    f"[WireSegHR][bench][Fine]   IoU={fine_sum['iou']:.4f} F1={fine_sum['f1']:.4f} P={fine_sum['precision']:.4f} R={fine_sum['recall']:.4f}"
+                )
+                print(
+                    f"[WireSegHR][bench][Coarse] IoU={coarse_sum['iou']:.4f} F1={coarse_sum['f1']:.4f} P={coarse_sum['precision']:.4f} R={coarse_sum['recall']:.4f}"
+                )
+
         return
 
+    # Single image mode
     if args.image is not None:
-        infer_image(
+        pred, _ = infer_image(
             model,
             args.image,
             cfg,
@@ -507,6 +576,17 @@ def main():
             out_dir=args.out,
             save_prob=args.save_prob,
         )
+        if args.metrics:
+            assert args.mask, "--mask is required with --image when --metrics is set"
+            assert Path(args.mask).is_file(), f"Mask not found: {args.mask}"
+            gt = cv2.imread(args.mask, cv2.IMREAD_GRAYSCALE)
+            assert gt is not None, f"Failed to read mask: {args.mask}"
+            gt_bin = (gt > 0).astype(np.uint8)
+            pred_bin = (pred > 0).astype(np.uint8)
+            m = compute_metrics(pred_bin, gt_bin)
+            print(
+                f"[Infer] IoU={m['iou']:.4f} F1={m['f1']:.4f} P={m['precision']:.4f} R={m['recall']:.4f}"
+            )
         print("[WireSegHR][infer] Done.")
         return
 
@@ -518,9 +598,16 @@ def main():
     )
     assert len(img_files) > 0, f"No .jpg/.jpeg in {img_dir}"
     os.makedirs(args.out, exist_ok=True)
+    if args.metrics:
+        assert args.masks_dir, (
+            "--masks_dir is required with --images_dir when --metrics is set"
+        )
+        assert Path(args.masks_dir).is_dir(), f"Not a directory: {args.masks_dir}"
+        metrics_sum = {"iou": 0.0, "f1": 0.0, "precision": 0.0, "recall": 0.0}
+        n_eval = 0
     for name in tqdm(img_files, desc="[infer] Dir"):
         path = str(Path(img_dir) / name)
-        infer_image(
+        pred, _ = infer_image(
             model,
             path,
             cfg,
@@ -529,6 +616,24 @@ def main():
             amp_dtype,
             out_dir=args.out,
             save_prob=args.save_prob,
+        )
+        if args.metrics:
+            stem = Path(name).stem
+            mask_path = Path(args.masks_dir) / f"{stem}.png"
+            assert mask_path.is_file(), f"Missing mask for {stem}: {mask_path}"
+            gt = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+            assert gt is not None, f"Failed to read mask: {mask_path}"
+            gt_bin = (gt > 0).astype(np.uint8)
+            pred_bin = (pred > 0).astype(np.uint8)
+            m = compute_metrics(pred_bin, gt_bin)
+            for k in metrics_sum:
+                metrics_sum[k] += m[k]
+            n_eval += 1
+    if args.metrics and n_eval > 0:
+        for k in metrics_sum:
+            metrics_sum[k] /= n_eval
+        print(
+            f"[Infer][Avg over {n_eval}] IoU={metrics_sum['iou']:.4f} F1={metrics_sum['f1']:.4f} P={metrics_sum['precision']:.4f} R={metrics_sum['recall']:.4f}"
         )
     print("[WireSegHR][infer] Done.")
 
