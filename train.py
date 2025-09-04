@@ -401,30 +401,6 @@ def main():
     print("[WireSegHR][train] Done.")
 
 
-def _sample_batch_same_size(
-    dset: WireSegDataset, batch_size: int
-) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-    # Use precomputed size bins to sample a batch from a single (H, W) bin
-    assert len(dset) > 0
-    bins = dset.size_bins
-    keys = list(bins.keys())
-    random.shuffle(keys)
-    chosen_key = None
-    for hw in keys:
-        if len(bins[hw]) >= batch_size:
-            chosen_key = hw
-            break
-    assert chosen_key is not None, f"No size bin with at least {batch_size} samples"
-    pool = bins[chosen_key]
-    idxs = np.random.choice(pool, size=batch_size, replace=False)
-    imgs: List[np.ndarray] = []
-    masks: List[np.ndarray] = []
-    for idx in idxs:
-        item = dset[int(idx)]
-        imgs.append(item["image"])
-        masks.append(item["mask"])
-    return imgs, masks
-
 
 def _prepare_batch(
     imgs: List[np.ndarray],
