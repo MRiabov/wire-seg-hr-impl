@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+
+import argparse
+from pathlib import Path
+import torch
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Strip training checkpoint to inference-only weights (FP32)."
+    )
+    parser.add_argument("--in", dest="inp", type=str, required=True, help="Path to training checkpoint .pt")
+    parser.add_argument("--out", dest="out", type=str, required=True, help="Path to save weights-only .pt")
+    args = parser.parse_args()
+
+    in_path = Path(args.inp)
+    out_path = Path(args.out)
+
+    assert in_path.is_file(), f"Input file does not exist: {in_path}"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ckpt = torch.load(str(in_path), map_location="cpu")
+
+    # Primary (project) format: {'step', 'model', 'optim', 'scaler', 'best_f1'}
+    if isinstance(ckpt, dict) and "model" in ckpt:
+        state_dict = ckpt["model"]
+    # Secondary common format: {'state_dict': model.state_dict(), ...}
+    elif isinstance(ckpt, dict) and "state_dict" in ckpt:
+        state_dict = ckpt["state_dict"]
+    else:
+        # Fallback: checkpoint is already a pure state_dict
+        assert isinstance(ckpt, dict) and all(isinstance(v, torch.Tensor) for v in ckpt.values()), (
+            "Checkpoint is not a recognized format: expected keys 'model' or 'state_dict', "
+            "or a pure state_dict (name->Tensor)."
+        )
+        state_dict = ckpt
+
+    # Ensure FP32 tensors (no casting to bf16/fp16 per request)
+    state_dict = {k: (v.float() if torch.is_floating_point(v) else v) for k, v in state_dict.items()}
+
+    torch.save(state_dict, str(out_path))
+    print(f"[strip_checkpoint] Saved weights-only to: {out_path}")
+
+
+if __name__ == "__main__":
+    main()
