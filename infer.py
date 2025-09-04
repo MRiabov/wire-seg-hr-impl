@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from torch.amp import autocast
 from tqdm import tqdm
 from safetensors.torch import load_file as safe_load_file
+import yaml
 
 from src.wireseghr.model import WireSegHR
 from pathlib import Path
