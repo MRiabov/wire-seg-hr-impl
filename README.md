@@ -142,5 +142,12 @@ Optional: you can save a JSON timing report with `--bench_report_json`. Schema:
 - `per_image`: list of objects with
   - `path`, `H`, `W`, `t_coarse_ms`, `t_fine_ms`, `t_total_ms`
 
-Utils: 
+### Utils: 
 - Export your model to inference-only weights by scripts/strip_checkpoint.py
+
+### Example:
+Input:
+<img src="images/026_input.png" alt="Input" width="50%"/>
+
+Fine prediction:
+<img src="images/026_fine_pred.png" alt="Fine prediction" width="50%"/>
