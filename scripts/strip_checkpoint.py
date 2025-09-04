@@ -35,11 +35,12 @@ def main():
         )
         state_dict = ckpt
 
-    # Ensure FP32 tensors (no casting to bf16/fp16 per request)
-    state_dict = {k: (v.float() if torch.is_floating_point(v) else v) for k, v in state_dict.items()}
+    #in the future, can cast to bfloat if necessary.
+    # state_dict = {k: (v.float() if torch.is_floating_point(v) else v) for k, v in state_dict.items()}
 
-    torch.save(state_dict, str(out_path))
-    print(f"[strip_checkpoint] Saved weights-only to: {out_path}")
+    to_save = {"model": state_dict}
+    torch.save(to_save, str(out_path))
+    print(f"[strip_checkpoint] Saved dict with only 'model' to: {out_path}")
 
 
 if __name__ == "__main__":
