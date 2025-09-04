@@ -3,14 +3,13 @@ import os
 import pprint
 import time
 from typing import List, Tuple, Optional, Dict, Any
-import yaml
-
 import numpy as np
 import cv2
 import torch
 import torch.nn.functional as F
 from torch.amp import autocast
 from tqdm import tqdm
+from safetensors.torch import load_file as safe_load_file
 
 from src.wireseghr.model import WireSegHR
 from pathlib import Path
@@ -256,7 +255,7 @@ def main():
         "--ckpt",
         type=str,
         default="",
-        help="Optional checkpoint (.pt) with model state",
+        help="Optional checkpoint (.pt with {'model': state_dict} or .safetensors with pure state_dict)",
     )
     parser.add_argument(
         "--save_prob", action="store_true", help="Also save probability .npy"
@@ -356,8 +355,22 @@ def main():
     if ckpt_path:
         assert Path(ckpt_path).is_file(), f"Checkpoint not found: {ckpt_path}"
         print(f"[WireSegHR][infer] Loading checkpoint: {ckpt_path}")
-        state = torch.load(ckpt_path, map_location=device)
-        model.load_state_dict(state["model"])
+        suffix = Path(ckpt_path).suffix.lower()
+        if suffix == ".safetensors":
+            # Safetensors exports contain a pure state_dict
+            state_dict = safe_load_file(ckpt_path)
+            model.load_state_dict(state_dict)
+        else:
+            print(
+                "[WireSegHR][infer][WARN] Loading a PyTorch checkpoint. Prefer .safetensors for inference-only weights."
+            )
+            # PyTorch .pt/.pth checkpoints expected to have {'model': state_dict}
+            state = torch.load(ckpt_path, map_location=device)
+            assert "model" in state, (
+                "Expected a dict with key 'model' for PyTorch checkpoint. "
+                "Use scripts/strip_checkpoint.py or provide a .safetensors file."
+            )
+            model.load_state_dict(state["model"])
     model.eval()
 
     # Benchmark mode

@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 import torch
+from safetensors.torch import save_file as safetensors_save_file
 
 
 def main():
@@ -10,7 +11,8 @@ def main():
         description="Strip training checkpoint to inference-only weights (FP32)."
     )
     parser.add_argument("--in", dest="inp", type=str, required=True, help="Path to training checkpoint .pt")
-    parser.add_argument("--out", dest="out", type=str, required=True, help="Path to save weights-only .pt")
+    parser.add_argument("--out", dest="out", type=str, required=True, help="Path to save weights-only .pt or .safetensors")
+    # Output format is inferred from --out extension
     args = parser.parse_args()
 
     in_path = Path(args.inp)
@@ -38,9 +40,14 @@ def main():
     #in the future, can cast to bfloat if necessary.
     # state_dict = {k: (v.float() if torch.is_floating_point(v) else v) for k, v in state_dict.items()}
 
-    to_save = {"model": state_dict}
-    torch.save(to_save, str(out_path))
-    print(f"[strip_checkpoint] Saved dict with only 'model' to: {out_path}")
+    suffix = out_path.suffix.lower()
+    if suffix == ".safetensors":
+        safetensors_save_file(state_dict, str(out_path))
+        print(f"[strip_checkpoint] Saved safetensors (pure state_dict) to: {out_path}")
+    else:
+        to_save = {"model": state_dict}
+        torch.save(to_save, str(out_path))
+        print(f"[strip_checkpoint] Saved dict with only 'model' to: {out_path}")
 
 
 if __name__ == "__main__":
