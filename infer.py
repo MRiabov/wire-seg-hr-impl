@@ -13,6 +13,7 @@ from safetensors.torch import load_file as safe_load_file
 import yaml
 
 from src.wireseghr.model import WireSegHR
+from src.wireseghr.model.stitching import get_patch_window
 from pathlib import Path
 from src.wireseghr.metrics import compute_metrics
 
@@ -108,6 +109,7 @@ def _tiled_fine_forward(
 
     prob_sum_t = torch.zeros((H, W), device=device, dtype=torch.float32)
     weight_t = torch.zeros((H, W), device=device, dtype=torch.float32)
+    patch_window = get_patch_window(P, device=device).to(dtype=torch.float32)
 
     hc4, wc4 = cond_map.shape[2], cond_map.shape[3]
 
@@ -154,10 +156,10 @@ def _tiled_fine_forward(
 
         for bi, (y0, x0) in enumerate(batch_coords):
             y1, x1 = y0 + P, x0 + P
-            prob_sum_t[y0:y1, x0:x1] += prob_f_up[bi]
-            weight_t[y0:y1, x0:x1] += 1.0
+            prob_sum_t[y0:y1, x0:x1] += prob_f_up[bi] * patch_window
+            weight_t[y0:y1, x0:x1] += patch_window
 
-    prob_full = (prob_sum_t / weight_t).detach().cpu().float()
+    prob_full = (prob_sum_t / weight_t.clamp_min(1e-6)).detach().cpu().float()
     return prob_full  # HxW torch.Tensor on CPU
 
 
@@ -448,6 +450,9 @@ def main():
                 save_prob=False,
             )
 
+        if device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats()
+
         # Timed runs
         for p in tqdm(img_files[args.bench_warmup :], desc="[bench] Timed"):
             # Replicate internals to time coarse vs fine separately
@@ -536,12 +541,26 @@ def main():
         avg_c, p50_c, p95_c = _agg("t_coarse_ms")
         avg_f, p50_f, p95_f = _agg("t_fine_ms")
         avg_t, p50_t, p95_t = _agg("t_total_ms")
+        peak_alloc_gb = (
+            float(torch.cuda.max_memory_allocated()) / (1024.0**3)
+            if device.type == "cuda"
+            else 0.0
+        )
+        peak_reserved_gb = (
+            float(torch.cuda.max_memory_reserved()) / (1024.0**3)
+            if device.type == "cuda"
+            else 0.0
+        )
 
         print("[WireSegHR][bench] Results (ms):")
         print(f"  Coarse  avg={avg_c:.2f}  p50={p50_c:.2f}  p95={p95_c:.2f}")
         print(f"  Fine    avg={avg_f:.2f}  p50={p50_f:.2f}  p95={p95_f:.2f}")
         print(f"  Total   avg={avg_t:.2f}  p50={p50_t:.2f}  p95={p95_t:.2f}")
         print(f"  Target  < 1000 ms per 3000x4000 image: {'YES' if p50_t < 1000.0 else 'NO'}")
+        if device.type == "cuda":
+            print(
+                f"  PeakVRAM alloc={peak_alloc_gb:.2f} GB reserved={peak_reserved_gb:.2f} GB"
+            )
 
         if args.bench_report_json:
             import json
@@ -554,9 +573,24 @@ def main():
                     "avg_coarse_ms": avg_c,
                     "avg_fine_ms": avg_f,
                     "images": len(timings),
+                    "peak_allocated_gb": peak_alloc_gb,
+                    "peak_reserved_gb": peak_reserved_gb,
                 },
                 "per_image": timings,
             }
+            if args.metrics and n_metrics > 0:
+                report["summary"].update(
+                    {
+                        "fine_iou": fine_sum["iou"] / n_metrics,
+                        "fine_f1": fine_sum["f1"] / n_metrics,
+                        "fine_precision": fine_sum["precision"] / n_metrics,
+                        "fine_recall": fine_sum["recall"] / n_metrics,
+                        "coarse_iou": coarse_sum["iou"] / n_metrics,
+                        "coarse_f1": coarse_sum["f1"] / n_metrics,
+                        "coarse_precision": coarse_sum["precision"] / n_metrics,
+                        "coarse_recall": coarse_sum["recall"] / n_metrics,
+                    }
+                )
             report_path = args.bench_report_json
             Path(report_path).parent.mkdir(parents=True, exist_ok=True)
             with open(report_path, "w") as f:

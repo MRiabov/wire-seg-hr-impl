@@ -3,6 +3,8 @@ from .decoder import CoarseDecoder, FineDecoder
 from .condition import Conditioning1x1
 from .minmax import MinMaxLuminance
 from .label_downsample import downsample_label_maxpool
+from .losses import DiceLoss
+from .stitching import get_patch_window
 from .model import WireSegHR
 
 __all__ = [
@@ -12,5 +14,7 @@ __all__ = [
     "Conditioning1x1",
     "MinMaxLuminance",
     "downsample_label_maxpool",
+    "DiceLoss",
+    "get_patch_window",
     "WireSegHR",
 ]

@@ -25,11 +25,33 @@ inference:
   alpha: 0.01
   prob_threshold: 0.5  # default inference threshold per paper tuning
   fine_patch_size: 1024
-  stitch: avg_logits
+  stitch: weighted_logits
 
 eval:
   max_samples: 12
   fine_batch: 16
+
+augment:
+  enable: true
+  hflip_prob: 0.5
+  rotation_deg: 8.0
+  scale_min: 0.9
+  scale_max: 1.1
+  brightness: 0.1
+  contrast: 0.1
+  saturation: 0.08
+  hue: 0.03
+  blur_prob: 0.12
+  noise_std: 3.0
+  jpeg_prob: 0.15
+  jpeg_quality_min: 70
+  jpeg_quality_max: 100
+  cutout_prob: 0.05
+
+loss:
+  ce_weight: 1.0
+  dice_weight: 1.0
+  dice_smooth: 1.0
 
 optim:
   iters: 5000

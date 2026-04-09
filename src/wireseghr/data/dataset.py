@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Tuple
 from pathlib import Path
 
 import numpy as np
-import cv2
 
 
 class WireSegDataset:
@@ -30,6 +29,8 @@ class WireSegDataset:
         return len(self._items)
 
     def __getitem__(self, idx: int) -> Dict[str, Any]:
+        import cv2
+
         img_path, mask_path = self._items[idx]
         img_bgr = cv2.imread(str(img_path), cv2.IMREAD_COLOR)
         assert img_bgr is not None, f"Failed to read image: {img_path}"
@@ -71,6 +72,8 @@ class WireSegDataset:
         return pairs
 
     def _compute_size_bins(self) -> None:
+        import cv2
+
         sizes: List[Tuple[int, int]] = []
         bins: Dict[Tuple[int, int], List[int]] = {}
         for idx, (_ip, mp) in enumerate(self._items):

@@ -124,6 +124,10 @@ dataset/
 #runs 
 runs/
 
+# autoresearch loop artifacts
+.autoresearch/
+results.tsv
+
 #exports
 exports/
 *.onnx
@@ -135,4 +139,3 @@ exports/
 *.tar.gz
 paper-tex/fixure_tex/
 paper-tex/figures/
-

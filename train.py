@@ -19,9 +19,11 @@ import time
 
 from src.wireseghr.model import WireSegHR
 from src.wireseghr.model.minmax import MinMaxLuminance
+from src.wireseghr.model.losses import DiceLoss
 from src.wireseghr.data.dataset import WireSegDataset
 from src.wireseghr.model.label_downsample import downsample_label_maxpool
 from src.wireseghr.data.sampler import BalancedPatchSampler
+from src.wireseghr.data.transforms import TrainTransforms
 from src.wireseghr.metrics import compute_metrics
 from infer import _coarse_forward, _tiled_fine_forward
 from pathlib import Path
@@ -173,6 +175,8 @@ def main():
         else None
     )
     sampler = BalancedPatchSampler(patch_size=patch_size, min_wire_ratio=0.01)
+    aug_cfg = cfg.get("augment", {})
+    augmenter = TrainTransforms(aug_cfg)
     minmax = (
         MinMaxLuminance(kernel=cfg["minmax"]["kernel"])
         if cfg["minmax"]["enable"]
@@ -196,6 +200,10 @@ def main():
     optim = torch.optim.AdamW(model.parameters(), lr=base_lr, weight_decay=weight_decay)
     scaler = GradScaler("cuda", enabled=(device.type == "cuda" and precision == "fp16"))
     ce = nn.CrossEntropyLoss()
+    loss_cfg = cfg.get("loss", {})
+    dice_loss = DiceLoss(smooth=float(loss_cfg.get("dice_smooth", 1.0)))
+    ce_weight = float(loss_cfg.get("ce_weight", 1.0))
+    dice_weight = float(loss_cfg.get("dice_weight", 1.0))
 
     # Resume
     start_step = 0
@@ -220,7 +228,7 @@ def main():
             data_iter = iter(train_loader)
             imgs, masks = next(data_iter)
         batch = _prepare_batch(
-            imgs, masks, coarse_train, patch_size, sampler, minmax, device
+            imgs, masks, coarse_train, patch_size, sampler, minmax, device, augmenter
         )
 
         with autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_enabled):
@@ -243,8 +251,22 @@ def main():
                 device,
             )
 
-            loss_coarse = ce(logits_coarse, y_coarse)
-            loss_fine = ce(logits_fine, y_fine)
+            loss_coarse = _segmentation_loss(
+                logits_coarse,
+                y_coarse,
+                ce,
+                dice_loss,
+                ce_weight,
+                dice_weight,
+            )
+            loss_fine = _segmentation_loss(
+                logits_fine,
+                y_fine,
+                ce,
+                dice_loss,
+                ce_weight,
+                dice_weight,
+            )
             loss = loss_coarse + loss_fine
 
         scaler.scale(loss).backward()
@@ -410,6 +432,7 @@ def _prepare_batch(
     sampler: BalancedPatchSampler,
     minmax: Optional[MinMaxLuminance],
     device: torch.device,
+    augmenter: Optional[TrainTransforms] = None,
 ):
     B = len(imgs)
     assert B == len(masks)
@@ -429,6 +452,8 @@ def _prepare_batch(
     yx_list: List[tuple[int, int]] = []
 
     for img, mask in zip(imgs, masks):
+        if augmenter is not None:
+            img, mask = augmenter(img, mask)
         # Float32 [0,1] on CPU, then move to GPU for heavy ops
         imgf = img.astype(np.float32) / 255.0
         t_img = (
@@ -570,6 +595,18 @@ def _build_fine_targets(
         ys.append(torch.from_numpy(dm.astype(np.int64)))
     y = torch.stack(ys, dim=0).to(device)  # BxHf4xWf4 with values {0,1}
     return y
+
+
+def _segmentation_loss(
+    logits: torch.Tensor,
+    target: torch.Tensor,
+    ce_loss: nn.Module,
+    dice_loss: nn.Module,
+    ce_weight: float,
+    dice_weight: float,
+) -> torch.Tensor:
+    """Compute the combined CE + Dice loss used by both branches."""
+    return ce_weight * ce_loss(logits, target) + dice_weight * dice_loss(logits, target)
 
 
 def set_seed(seed: int):
