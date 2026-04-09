@@ -59,7 +59,7 @@ matter for this repo are `pydrive2`, `gdown`, and `transformers`, so the
 
 ## Dataset Prep
 
-The repo’s data pipeline lives in `scripts/setup_script.sh` and
+The repo’s data pipeline lives in `scripts/setup.sh` and
 `scripts/pull_and_preprocess_wireseghr_dataset.py`.
 
 Recommended order:
@@ -67,16 +67,11 @@ Recommended order:
 ```bash
 cd /workspace/wire-seg-hr-impl
 source /venv/main/bin/activate
-uv pip install -r requirements.txt
-python3 scripts/pull_and_preprocess_wireseghr_dataset.py pull \
-  --output-dir dataset/wireseghr_raw \
-  --service-account secrets/drive-json.json
-bash scripts/pull_ttpla.sh "" "" ttpla_dataset
-bash scripts/setup_script.sh
+bash scripts/setup.sh
 ```
 
-If you want to use different TTPLA paths, update the environment variables in
-`scripts/setup_script.sh` before running it.
+The script is rerunnable. It skips the TTPLA download if the raw JSONs already
+exist, and the WireSegHR pull is incremental.
 
 ## Benchmark / Experiment Loop
 
@@ -102,4 +97,3 @@ python3 scripts/autoresearch_record.py \
 3. Re-copy the Google Drive key.
 4. Re-run `uv pip install -r requirements.txt`.
 5. Re-run the dataset prep and benchmark steps above.
-
