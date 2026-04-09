@@ -1,5 +1,6 @@
 import os
 import argparse
+import json
 import threading
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,13 +22,16 @@ def _get_thread_drive(service_account_json: str) -> GoogleDrive:
 
 def authenticate(service_account_json):
     """Authenticate PyDrive2 with a service account."""
+    with open(service_account_json, "r", encoding="utf-8") as f:
+        service_account = json.load(f)
+
     gauth = GoogleAuth()
     # Configure PyDrive2 to use service account credentials directly
     gauth.settings["client_config_backend"] = "service"
     gauth.settings["service_config"] = {
         "client_json_file_path": service_account_json,
-        # Provide the key to satisfy PyDrive2 even if not impersonating
-        "client_user_email": "drive-bot@web-design-396514.iam.gserviceaccount.com",
+        # Use the service account identity from the supplied JSON key.
+        "client_user_email": service_account["client_email"],
     }
     gauth.ServiceAuth()
     drive = GoogleDrive(gauth)
